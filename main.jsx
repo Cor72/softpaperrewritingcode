@@ -15,7 +15,7 @@ const readStrictFlag = () => {
     const saved = localStorage.getItem(STRICT_STORAGE_KEY)
     if (saved === '1') return true
     if (saved === '0') return false
-  } catch (e) {}
+  } catch(err){}
   return import.meta.env.DEV || import.meta.env.VITE_STRICT_MODE === '1'
 }
 
@@ -24,10 +24,7 @@ const strictMode = readStrictFlag()
 const mount = (el) => {
   if(strictMode){
     const app=<StrictMode><App /></StrictMode>
-  }else{
-    const app=<App />
-  }
-
+  }else{const app=<App />}
   createRoot(el).render(app)
 }
 

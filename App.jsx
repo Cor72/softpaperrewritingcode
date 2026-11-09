@@ -53,33 +53,33 @@ import { applySubquestionScenario, updateSubquestionScenarioDelta } from './phys
 import { AlertTriangle, UserRound, BookOpen, Check, ChevronDown, ChevronUp, Download, FileImage, FolderOpen, Grid2X2, Hand, Moon, MousePointer2, MoreHorizontal, Pause, Plus, Play, Redo2, RotateCcw, Save, Sun, Undo2, Upload, X, Zap } from 'lucide-react'
 import { DEFAULT_PIXELS_PER_METER, PRESETS, addComponentForTool, bodyConstraintAttachmentSnapPreview, beginParameterExperiment, buildSceneFromEvidence, componentsInSelectionRect, constraintAttachmentSnapPreview, contactMaterialBetween, createScene, convertToSandbox, springStoredEnergy, materializeRuntimeScene, normalizeScene, sourceFaithfulPaperAnnotations, presetScene, removeComponent, resizeComponent, supportSnapPreview, settleEditorScene, touchScene, translateComponent, translateComponents, updateComponent, updateContactMaterial, updateConstraintAttachment, updateConstraintAttachmentMode, updateRopeLength, wedgeSurfaceSegment } from './model.js'
 
-const MAX_CONCURRENT_DRAWING_COMPONENTS = 3
-const DRAWING_ROW_TOLERANCE = 48
-const DRAWING_PEN_TIP_X = 35
+const MAX_CONCURRENT_DRAWING_COMPONENTS =3
+const DRAWING_ROW_TOLERANCE =48
+const DRAWING_PEN_TIP_X =35
 const DRAWING_PEN_TIP_Y = 9
 const DRAWING_COMPONENT_SELECTOR = '.scene-constraints > *, .scene-supports > *, .scene-anchors > *, .scene-bodies > *'
 
 const THEME_PREFERENCE_KEY = 'xingchi-vision-v3:theme'
 
-const DRAFT_SAVE_DELAY_MS = 450
-const TOAST_DURATION_MS = 2200
-const SAVE_FEEDBACK_MS = 2400
-const IMPORT_SIZE_LIMIT = 5 * 1024 * 1024
+const DRAFT_SAVE_DELAY_MS=450
+const TOAST_DURATION_MS=2200
+const SAVE_FEEDBACK_MS=2400
+const IMPORT_SIZE_LIMIT=5 * 1024 * 1024
 
-// 这三类卡点都是参数没填全，直接把属性面板拉出来，比只弹个 toast 好使得多
+//运行时拉属性面板
 const RUN_BLOCKING_CODES = ['PROCESS_PARAMETERS_REQUIRED', 'PROCESS_COMPONENT_BINDING_REQUIRED', 'MOTION_INVALID']
 
-// 复位相关的提示出现得太频繁，抽出来免得哪天改文案漏掉一处
-const TOAST_NEED_RESET = '请先复位，再编辑初始条件'
-const TOAST_NEED_UNLOCK = '请先解锁装置，再编辑元件'
-const TOAST_STORAGE_FULL = '本机存储不可用或已满，请立即备份画布。'
+//复位提示复用
+const TOAST_NEED_RESET = '先复位喵，看看初始条件'
+const TOAST_NEED_UNLOCK = '编辑元件记得解锁装置'
+const TOAST_STORAGE_FULL = '存储空间满了，记得备份画布'
 
-const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
+const readFileAsDataUrl =function(file){new Promise((resolve,reject) => {
   const reader = new FileReader()
   reader.onload = () => resolve(String(reader.result || ''))
   reader.onerror = () => reject(reader.error)
   reader.readAsDataURL(file)
-})
+})}
 
 const textFingerprint = (text) => {
   const value = String(text || '')
