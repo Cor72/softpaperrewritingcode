@@ -16,9 +16,8 @@ import {constraintChangeFamilies,stepConstraintChange} from './constraintChangeE
 import {springShuttleFamily,stepSpringShuttle} from './springShuttle.js'
 import {inclinePlankPassageFamily,stepInclinePlank} from './inclinePlankPassage.js'
 import {observePathCrossings} from './pathObservationEvents.js'
-// 物理引擎。渲染那边每帧调一次 tickWorld，剩下的都是它底下的小工具。
-// 长度一律按像素走，只有算能量和动量的时候才除回去换成米。
-// 别在这里碰 DOM，画布上的事归 BoardCanvas 管。
+// 物理引擎。渲染帧调tickWorld,剩下的都是小工具。
+// 这里不用DOM，画布去看BoardCanvas
 const PIXELS_PER_METER = 52
 const EPSILON = 1e-7;
 const MAX_INTERNAL_SUBSTEPS =32
