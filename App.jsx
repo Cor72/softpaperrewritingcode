@@ -1,30 +1,11 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { accountStore } from './account/store.js'
-import { springEnergyEvidence } from './physics/springEnergyEvidence.js'
-import { normalizeParameterDraft, parameterStepDisabled, stepParameterValue, snapParameterAngle, formatParameterValue } from './parameterInput.js'
-import { trackInclination, trackSlope, editTrackInclination, formatAngle } from './trackAnglePresentation.js'
-import { objectObservations, globalObservation } from './observationPresentation.js'
-import { createQuestionOperation } from './account/usageAccess.js'
-import { listLocalConstructionHandles } from './ai/constructionJobClient.js'
-import { localConstructionRecoveryAllowed, recoverConstructionResult } from './ai/constructionRecovery.js'
-import { loadSourceImage, restoredSourceImageProvenance, saveSourceImage, sha256OfBlob } from './ai/sourceImageStore.js'
-import { prepareProblemImage, requestProblemUploadPolicy } from './ai/problemImage.js'
 import AccountDialog from './account/AccountDialog.jsx'
+import { accountStore } from './account/store.js'
+import { createQuestionOperation } from './account/usageAccess.js'
 import { SceneTitle } from './components/SceneTitle.jsx'
-import { gsap } from 'gsap'
-import { useGSAP } from '@gsap/react'
-import { createPaletteMotion } from './paletteMotion.js'
-import { editorSupportHandles, editorResizePoint, editorSnapPreviewGeometry, editorConstraintSnapshot, editorSelectionScene } from './editorHandles.js'
 import { SchoolProcessParameters } from './components/SchoolProcessParameters.jsx'
 import { ConstructionScopeNotice, formatConstructionClock, sceneConstructionProcess, selectedPhaseScopeLabel } from './components/ConstructionScopeNotice.jsx'
-import { mergeSourceImageProvenance } from '../shared/sourceImageProvenance.js'
-import { aiSceneViewportIdentity, fitSceneBoundsToViewport } from './aiViewport.js'
-import { evaluateProblemBuildReadiness, scenePhysicsKey, sceneRunReadiness } from './ai/problemAnalysis.js'
-import { createProblemReviewDraft, rebuildClosedBankDraft, recoverRetainedBankDraft, ANSWER_MEDIA_NOTICE } from './ai/problemReviewDraft.js'
-import { prepareProblemCanvasDelivery, rebuildRetainedProblem, rebindScenarioConditionEvidence } from './ai/problemCanvasDelivery.js'
-import { problemFlow, problemResultPresentation, hasBankContent, hasProblemTextEdit, captureReferenceReview, referenceReviewedScene, shouldRequestConstructionConstraints, rebuildProblemFromRetainedEvidence } from './ai/problemFlow.js'
 import { AnswerPresentation } from './components/AnswerPresentation.jsx'
-import { hasSubstantiveAnswer } from '../shared/answerPresentation.js'
 import { ReferenceSolutionPresentation, ReferenceSolutionReview } from './components/ReferenceSolution.jsx'
 import { PhysicsText } from './components/PhysicsText.jsx'
 import { AiTaskStatus } from './components/AiTaskStatus.jsx'
@@ -36,105 +17,111 @@ import { BodyAppearance, BodyToolIcon } from './components/BodyAppearance.jsx'
 import { WorkspacePanel } from './components/WorkspacePanel.jsx'
 import { PaletteRail } from './components/PaletteRail.jsx'
 import { SceneLibraryDialog } from './components/SceneLibraryDialog.jsx'
-import { trapDialogFocus } from './dialogFocus.js'
-import { useAnchoredDetailsMenu } from './anchoredMenu.js'
+import BoardCanvas from './components/BoardCanvas.jsx'
+import { PlaybackControls } from './components/PlaybackControls.jsx'
+import { ComponentPalette } from './components/ComponentPalette.jsx'
+import { BottomDock } from './components/BottomDock.jsx'
+import { RuntimePhysicsInspector } from './components/RuntimePhysicsInspector.jsx'
+import { SubquestionScenarioPanel } from './components/SubquestionScenarioPanel.jsx'
+import { AiBuilder } from './components/AiBuilder.jsx'
+import { ConstructCore } from './components/ConstructCore.jsx'
+import { SceneCanvasThumbnail } from './components/SceneCanvasThumbnail.jsx'
+import { ConfirmationDialog, IconButton } from './components/ui.jsx'
+import { AlertTriangle, UserRound, BookOpen, Check, ChevronDown, ChevronUp, Download, FileImage, FolderOpen, Grid2X2, Hand, Moon, MousePointer2, MoreHorizontal, Pause, Plus, Play, Redo2, RotateCcw, Save, Sun, Undo2, Upload, X, Zap } from 'lucide-react'
+// 物理模型层，基本都是从 model.js 里扒出来的
+import { DEFAULT_PIXELS_PER_METER, PRESETS, addComponentForTool, bodyAttachSnapPreview, beginParameterExperiment, buildSceneFromEvidence, componentsInSelectionRect, attachSnapPreview, contactMaterialBetween, createScene, convertToSandbox, springStoredEnergy, materializeScene, normalizeScene, paperAnnotations, presetScene, removeComponent, resizeComponent, supportSnapPreview, settleEditorScene, touchScene, translateComponent, translateComponents, updateComponent, updateContactMaterial, updateConstraintAttachment, updateConstraintAttachmentMode, updateRopeLength, wedgeSurfaceSegment } from './model.js'
+import { arcVisualGeometry, bodyVisualPose, cartWheelVisualGeometry, compoundVisualBodies, constraintVisibleAtTime, conveyorBeltMarkers, fixedAnchorVisualGeometry, grooveVisualGeometry, inclineVisualOutline, openBoxVisualGeometry, mountedSpringView, liveBodyDisplay, nearestContactAngle, pointGlyphOffsets, supportHatchSegments, supportVisualSurface, visibleSupportGeometry, polar, arcSweepRadians, normalizedDegrees } from './visualGeometry.js'
+import { springEnergyData } from './physics/springEnergyEvidence.js'
+import { applySubquestionScenario, updateSubquestionDelta } from './physics/subquestionScenarios.js'
+import { normalizeParameterDraft, parameterStepDisabled, stepParameterValue, snapParameterAngle, formatParameterValue, formatNumericValue } from './parameterInput.js'
+import { trackInclination, trackSlope, editTrackInclination, formatAngle } from './trackAnglePresentation.js'
+import { objectObservations, globalObservation } from './observationPresentation.js'
+// AI 出题/搭建这一坨
+import { listLocalBuilds } from './ai/constructionJobClient.js'
+import { canRecoverLocalBuild, recoverConstructionResult } from './ai/constructionRecovery.js'
+import { loadSourceImage, restoredImageMeta, saveSourceImage, sha256OfBlob } from './ai/sourceImageStore.js'
+import { prepareProblemImage, requestProblemUploadPolicy } from './ai/problemImage.js'
+import { mergeImageMeta } from '../shared/sourceImageProvenance.js'
+import { aiSceneViewportIdentity, fitSceneBoundsToViewport } from './aiViewport.js'
+import { checkBuildReadiness, scenePhysicsKey, sceneRunReadiness } from './ai/problemAnalysis.js'
+import { createProblemReviewDraft, rebuildClosedBankDraft, recoverKeptBankDraft, ANSWER_MEDIA_NOTICE } from './ai/problemReviewDraft.js'
+import { prepareCanvasDelivery, rebuildRetainedProblem, rebindScenarioData } from './ai/problemCanvasDelivery.js'
+import { problemFlow, problemResultView, hasBankContent, hasProblemTextEdit, captureReferenceReview, referenceReviewedScene, needBuildConstraints, rebuildProblemFromKeptData } from './ai/problemFlow.js'
+import { hasRealAnswer } from '../shared/answerPresentation.js'
 import { insertAssembly, updateAssembly, dissolveAssembly } from './componentAssemblies.js'
 import { assemblyForMember, assemblyRecipe, expandAssemblySelection } from './assemblyCatalog.js'
 import { selectAssemblyItem, editAssemblyMembers } from './assemblyEditing.js'
 import { runBuildLoop } from './agent/harness.js'
 import { applySvgDrawingStroke, captureSvgDrawingStroke, restoreSvgDrawingStroke } from './drawingStroke.js'
 import { usePhysicsRuntime, useRuntimeSnapshot, useRuntimeValue, selectRuntimeCompounds, selectRuntimeStarted, sameCompounds } from './usePhysicsRuntime.js'
-import { commitHistory, isEditingTarget, hasSceneEdit, assemblyEditRequiresReset } from './editorHistory.js'
+import { commitHistory, isEditingTarget, isTextInput, hasSceneEdit, assemblyEditRequiresReset } from './editorHistory.js'
 import { loadWorkspace, readSceneLibrary, saveDraft, saveSceneToStorage, deleteSceneFromStorage, sceneContentKey, sceneForStorage } from './sceneStorage.js'
-import { prepareImportedSceneDocument } from './sceneValidation.js'
-import { arcVisualGeometry, bodyVisualPose, cartWheelVisualGeometry, compoundVisualBodies, constraintVisibleAtTime, conveyorBeltMarkers, fixedAnchorVisualGeometry, grooveVisualGeometry, inclineVisualOutline, openBoxVisualGeometry, mountedSpringPresentation, liveBodyDisplay, nearestPointBodyContactAngle, pointGlyphDisplayOffsets, supportHatchSegments, supportVisualSurface, visibleSupportGeometry } from './visualGeometry.js'
+import { prepareImportedScene } from './sceneValidation.js'
+import { createPaletteMotion } from './paletteMotion.js'
+import { editorSupportHandles, editorResizePoint, editorSnapPreviewGeometry, editorConstraintSnapshot, editorSelectionScene, EndpointHandle, AngleLabel, SurfaceHatching } from './editorHandles.js'
 import { editorSnapDistance } from './editorPlacement.js'
-import { applySubquestionScenario, updateSubquestionScenarioDelta } from './physics/subquestionScenarios.js'
-import { AlertTriangle, UserRound, BookOpen, Check, ChevronDown, ChevronUp, Download, FileImage, FolderOpen, Grid2X2, Hand, Moon, MousePointer2, MoreHorizontal, Pause, Plus, Play, Redo2, RotateCcw, Save, Sun, Undo2, Upload, X, Zap } from 'lucide-react'
-import { DEFAULT_PIXELS_PER_METER, PRESETS, addComponentForTool, bodyConstraintAttachmentSnapPreview, beginParameterExperiment, buildSceneFromEvidence, componentsInSelectionRect, constraintAttachmentSnapPreview, contactMaterialBetween, createScene, convertToSandbox, springStoredEnergy, materializeRuntimeScene, normalizeScene, sourceFaithfulPaperAnnotations, presetScene, removeComponent, resizeComponent, supportSnapPreview, settleEditorScene, touchScene, translateComponent, translateComponents, updateComponent, updateContactMaterial, updateConstraintAttachment, updateConstraintAttachmentMode, updateRopeLength, wedgeSurfaceSegment } from './model.js'
+import { trapDialogFocus } from './dialogFocus.js'
+import { useAnchoredDetailsMenu } from './anchoredMenu.js'
 
+const DRAWING_COMPONENT_SELECTOR = '.scene-constraints > *, .scene-supports > *, .scene-anchors > *, .scene-bodies > *'
 const MAX_CONCURRENT_DRAWING_COMPONENTS =3
 const DRAWING_ROW_TOLERANCE =48
 const DRAWING_PEN_TIP_X =35
 const DRAWING_PEN_TIP_Y = 9
-const DRAWING_COMPONENT_SELECTOR = '.scene-constraints > *, .scene-supports > *, .scene-anchors > *, .scene-bodies > *'
-
+const IMPORT_SIZE_LIMIT=5 * 1024 * 1024
 const THEME_PREFERENCE_KEY = 'xingchi-vision-v3:theme'
 
+// 单位都是毫秒
 const DRAFT_SAVE_DELAY_MS=450
 const TOAST_DURATION_MS=2200
 const SAVE_FEEDBACK_MS=2400
-const IMPORT_SIZE_LIMIT=5 * 1024 * 1024
+
+// 动画就调色板导轨
+import { gsap } from 'gsap'
+import { useGSAP } from '@gsap/react'
+
+// 有运动程序的场景要先转成沙盒态再改
+const needsSandbox = (target) => target.components.some(item => item.motionProgram)
+
+// 读文件用的,走 file.text()
+const readFile = file => new Promise((resolve,reject) => {
+  const reader = new FileReader();
+  reader.onload =()=>resolve(String(reader.result||''));
+  reader.onerror =()=>reject(reader.error);
+  reader.readAsDataURL(file);
+})
+
+// const textHash = s => s.length // 老的偷懒版，撞名撞怕了
+const textHash = (text)=> {
+  const value = String(text||'');
+  let hash =0;
+  for (let i=0;i<value.length; i++){
+    hash=(hash*31 + value.charCodeAt(i))|0;
+  }
+  return hash;
+}
+
+const agentSourceKey = (analysis) => analysis?.sourceImageProvenance?.submittedSha256 ?? ''
+
+// 主题偏好属于本机体验设置：记住上次选择，首次访问跟随系统的黑板/白板偏好。
+function readTheme() {
+  try {
+    const saved = window.localStorage.getItem(THEME_PREFERENCE_KEY)
+    if (saved === 'dark') return true
+    if (saved === 'light') return false
+  } catch {
+    // 本机存储不可用时回落到系统偏好
+  }
+  try { return window.matchMedia?.('(prefers-color-scheme: dark)')?.matches === true } catch { return false }
+}
 
 //运行时拉属性面板
 const RUN_BLOCKING_CODES = ['PROCESS_PARAMETERS_REQUIRED', 'PROCESS_COMPONENT_BINDING_REQUIRED', 'MOTION_INVALID']
 
-//复位提示复用
+// 这几条提示到处用，提出来省得改两遍
 const TOAST_NEED_RESET = '先复位喵，看看初始条件'
 const TOAST_NEED_UNLOCK = '编辑元件记得解锁装置'
 const TOAST_STORAGE_FULL = '存储空间满了，记得备份画布'
-
-const readFileAsDataUrl =function(file){new Promise((resolve,reject) => {
-  const reader = new FileReader()
-  reader.onload = () => resolve(String(reader.result || ''))
-  reader.onerror = () => reject(reader.error)
-  reader.readAsDataURL(file)
-})}
-
-const textFingerprint = (text) => {
-  const value = String(text || '')
-  let hash = 0
-  for (let i = 0; i < value.length; i++) {
-    hash = (hash * 31 + value.charCodeAt(i)) | 0
-  }
-  return hash
-}
-
-const agentSourceKey = (analysis) => {
-  const sha = analysis?.sourceImageProvenance?.submittedSha256
-  if (sha) return sha
-  return ''
-}
-
-// 有运动程序的场景要先转成沙盒态再改，不然改完和运行时对不上
-const needsSandbox = (target) => target.components.some(item => item.motionProgram)
-
-// 主题偏好属于本机体验设置：记住上次选择，首次访问跟随系统的黑板/白板偏好。
-function readThemePreference() {
-  try {
-    const stored = window.localStorage.getItem(THEME_PREFERENCE_KEY)
-    if (stored === 'dark') return true
-    if (stored === 'light') return false
-  } catch {
-    // 本机存储不可用时回落到系统偏好
-  }
-  try {
-    const media = window.matchMedia?.('(prefers-color-scheme: dark)')
-    return media?.matches === true
-  } catch {
-    return false
-  }
-}
-
-function persistThemePreference(dark) {
-  let themeName = 'light'
-  let themeColor = '#fbfcf8'
-  if (dark) {
-    themeName = 'dark'
-    themeColor = '#1c1c1e'
-  }
-  try {
-    window.localStorage.setItem(THEME_PREFERENCE_KEY, themeName)
-  } catch {
-    // 主题偏好不是关键数据，写不进去就算了
-  }
-  try {
-    const meta = document.querySelector?.('meta[name="theme-color"]')
-    meta?.setAttribute('content', themeColor)
-  } catch {
-    // 无 DOM 环境时忽略
-  }
-}
 
 export function App() {
   const accountState = useSyncExternalStore(accountStore.subscribe, accountStore.getSnapshot, accountStore.getSnapshot)
@@ -162,9 +149,7 @@ export function App() {
   const selectedId = selectedIds[selectedIds.length - 1] ?? null
 
   const setSelectedId = (id) => {
-    let next = []
-    if (id) next = [id]
-    setSelectedIds(next)
+    setSelectedIds(id ? [id] : [])
     setEditingAssemblyId(null)
   }
 
@@ -174,8 +159,8 @@ export function App() {
   const [aiOpen, setAiOpen] = useState(false)
 
   const moreMenu = useAnchoredDetailsMenu()
-  const toggleMoreMenu = (event) => {
-    event.preventDefault()
+  const toggleMoreMenu = (ev) => {
+    ev.preventDefault()
     moreMenu.toggle()
   }
 
@@ -195,18 +180,14 @@ export function App() {
   }
 
   const setObjectsOpen = (value) => {
-    let next = value
-    if (typeof value === 'function') next = value(objectsOpen)
-    if (next) {
-      openPane('objects')
-      return
-    }
+    const next = typeof value === 'function' ? value(objectsOpen) : value
+    if (next) return openPane('objects')
     setPanelOpen(false)
   }
 
   const [paletteMode, setPaletteMode] = useState('components')
   const [aiDrawing, setAiDrawing] = useState(null)
-  const [dark, setDark] = useState(readThemePreference)
+  const [dark, setDark] = useState(readTheme)
 
   const [toast, setToast] = useState(() => {
     if (initialWorkspace.warning) return initialWorkspace.warning
@@ -250,11 +231,11 @@ export function App() {
     () => compoundVisualBodies(scene.components, positions, compounds, scene.annotations),
     [scene, positions, compounds]
   )
-  const compositeMemberIds = useMemo(() => new Set(compositeBodies.flatMap(body => body.memberIds)), [compositeBodies])
+  const memberIdSet = useMemo(() => new Set(compositeBodies.flatMap(body => body.memberIds)), [compositeBodies])
   const listedObjects = useMemo(() => [
-    ...scene.components.filter(item => !compositeMemberIds.has(item.id)),
+    ...scene.components.filter(item => !memberIdSet.has(item.id)),
     ...compositeBodies
-  ], [scene.components, compositeBodies, compositeMemberIds])
+  ], [scene.components, compositeBodies, memberIdSet])
 
   const contentKey = useMemo(() => sceneContentKey(scene), [scene])
   const dirty = contentKey !== savedKey
@@ -266,6 +247,7 @@ export function App() {
       return
     }
     if (!runReadiness.ready) {
+      // 学校流程实验必须先在面板里补参数，教研 9 月定的规矩，别问
       if (scene.schoolProcess && RUN_BLOCKING_CODES.includes(runReadiness.code)) {
         setSelectedIds([])
         setEditingAssemblyId(null)
@@ -301,20 +283,16 @@ export function App() {
     run()
   }
 
-  const selected = scene.components.find(item => item.id === selectedId) ?? null
+  const selected = scene.components.find(c => c.id === selectedId) ?? null
   const selectedGroup = assemblyForMember(scene, selectedId)
 
-  let editingAssembly = null
-  if (selectedGroup?.id === editingAssemblyId) editingAssembly = selectedGroup
-
+  const editingAssembly = selectedGroup?.id === editingAssemblyId ? selectedGroup : null
   const groupFullySelected = selectedGroup
     && selectedIds.length === selectedGroup.memberIds.length
     && selectedGroup.memberIds.every(id => selectedIds.includes(id))
+  const selectedAssembly = !editingAssembly && groupFullySelected ? selectedGroup : null
 
-  let selectedAssembly = null
-  if (!editingAssembly && groupFullySelected) selectedAssembly = selectedGroup
-
-  const ensureInitialEditing = () => {
+  const ensureEditable = () => {
     if (running || snapshotRef.current.time > 0) {
       setToast(TOAST_NEED_RESET)
       return false
@@ -323,12 +301,12 @@ export function App() {
   }
 
   const editMembers = (ids, apply) => {
-    if (!ensureInitialEditing()) return scene
+    if (!ensureEditable()) return scene
     let base = scene
     if (needsSandbox(scene)) base = convertToSandbox(scene)
     const next = editAssemblyMembers(base, ids, apply)
     if (!hasSceneEdit(base, next)) return scene
-    commitPhysicalEdit(next)
+    commitEdit(next)
     return next
   }
 
@@ -355,12 +333,12 @@ export function App() {
     if (!aiDrawing?.scene) return
     pause()
     setAiDrawing(null)
-    setToast('装置已生成，可直接修改初始状态')
+    setToast('装置画好喵，初始状态随便改')
   }, [aiDrawing, pause])
 
   const commit = useCallback((next) => setTimeline(current => commitHistory(current, next)), [])
 
-  const commitPhysicalEdit = (next) => {
+  const commitEdit = (next) => {
     let editable = next
     if (needsSandbox(next)) editable = convertToSandbox(next)
     if (hasSceneEdit(scene, editable)) editable = beginParameterExperiment(editable)
@@ -381,24 +359,24 @@ export function App() {
     }
     if (preserveCurrent) {
       if (save()) apply()
-      else setToast('原画布暂时无法保存，新场景仍已保留。请腾出本机存储空间后再打开。')
+      else setToast('存不下了，先清清本机存储再开新的')
       return
     }
     setPendingReplacement({ apply })
   }
 
-  const selectSubquestionScenario = (variantId) => {
+  const selectSubScenario = (variantId) => {
     if (!scene.scenarioVariants || running || aiDrawing) return
-    const next = rebindScenarioConditionEvidence(applySubquestionScenario(scene, variantId))
+    const next = rebindScenarioData(applySubquestionScenario(scene, variantId))
     resetScene(next)
     commit(next)
     const variant = next.scenarioVariants?.variants?.find(item => item.id === variantId)
     setToast(`已切换到${variant?.label ?? '所选小问'}的题目条件`)
   }
 
-  const changeSubquestionCondition = (variantId, deltaId, value) => {
+  const changeSubCondition = (variantId, deltaId, value) => {
     if (!scene.scenarioVariants || running || aiDrawing) return
-    const next = rebindScenarioConditionEvidence(updateSubquestionScenarioDelta(scene, variantId, deltaId, value), { experiment: true })
+    const next = rebindScenarioData(updateSubquestionDelta(scene, variantId, deltaId, value), { experiment: true })
     resetScene(next)
     commit(next)
     setToast('已修改当前小问的条件')
@@ -450,6 +428,7 @@ export function App() {
     return () => window.removeEventListener('beforeunload', protectDraft)
   }, [scene, dirty])
 
+  // TODO: 历史栈没设上限，玩久了会不会爆内存，回头压一下
   const undo = () => setTimeline((current) => {
     if (!current.past.length) return current
     const previous = current.past[current.past.length - 1]
@@ -484,7 +463,7 @@ export function App() {
   }, [scene])
 
   useEffect(() => {
-    persistThemePreference(dark)
+    saveTheme(dark)
   }, [dark])
 
   useEffect(() => {
@@ -498,6 +477,21 @@ export function App() {
     const timer = window.setTimeout(() => setSaveFeedback(false), SAVE_FEEDBACK_MS)
     return () => window.clearTimeout(timer)
   }, [saveFeedback])
+
+  // 方向键挪元件，Shift 大步走。抽出来是因为 keydown 那个 effect 太长了
+  const nudgeSelection = (key, shiftKey) => {
+    const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }
+    const arrow = arrows[key]
+    if (!arrow || !selectedIds.length || running || snapshotRef.current.time > 0) return
+    const [dx, dy] = arrow
+    const step_size = shiftKey ? 10 : 1
+    const delta = { x: dx * step_size, y: dy * step_size }
+    if (editingAssembly) {
+      editMembers(selectedIds, base => translateComponent(base, selectedId, delta, { snap: false }))
+    } else {
+      commitEdit(translateComponents(scene, selectedIds, delta))
+    }
+  }
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -525,28 +519,18 @@ export function App() {
       if (wantsDelete && selectedIds.length && !isTextInput(event.target)) {
         event.preventDefault()
         if (running || snapshotRef.current.time > 0) return
-        const next = editMembers(selectedIds, base => selectedIds.reduce((result, id) => removeComponent(result, id), base))
+        const next = editMembers(selectedIds, base => selectedIds.reduce((acc, id) => removeComponent(acc, id), base))
         if (next === scene) {
-          setToast('元件已锁定或与其他组合相连，请先解锁或解除连接')
+          setToast('元件锁着或者跟别的组合连着，先解锁/解绑')
         } else {
           setSelectedIds([])
           setEditingAssemblyId(null)
         }
       }
 
-      const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }
-      const arrow = arrows[event.key]
-      if (arrow && selectedIds.length && !running && snapshotRef.current.time === 0) {
+      if (event.key.startsWith('Arrow') && selectedIds.length) {
         event.preventDefault()
-        const [dx, dy] = arrow
-        let distance = 1
-        if (event.shiftKey) distance = 10
-        const delta = { x: dx * distance, y: dy * distance }
-        if (editingAssembly) {
-          editMembers(selectedIds, base => translateComponent(base, selectedId, delta, { snap: false }))
-        } else {
-          commitPhysicalEdit(translateComponents(scene, selectedIds, delta))
-        }
+        nudgeSelection(event.key, event.shiftKey)
       }
 
       const onControl = event.target.closest?.('button, summary, a')
@@ -580,13 +564,13 @@ export function App() {
 
   const addTool = (tool) => {
     if (assemblyEditRequiresReset(scene, running, snapshotRef.current.time)) {
-      setToast('请先复位，再添加元件；当前装置组合保持不变')
+      setToast('先复位喵，再加元件，装置组合不动你的')
       return
     }
     let base = scene
     if (needsSandbox(scene)) base = convertToSandbox(scene)
     const next = addComponentForTool(base, tool)
-    commitPhysicalEdit(next)
+    commitEdit(next)
     setFitRequest(value => value + 1)
     const created = next.components[next.components.length - 1]
     setSelectedId(created?.id ?? null)
@@ -613,14 +597,14 @@ export function App() {
       let base = scene
       if (needsSandbox(scene)) base = convertToSandbox(scene)
       const next = insertAssembly(base, recipeId)
-      commitPhysicalEdit(next)
+      commitEdit(next)
       setEditingAssemblyId(null)
       setSelectedIds(next.assemblies.at(-1).memberIds)
       if (!aiOpen) setInspectorOpen(true)
       setFitRequest(value => value + 1)
       setToast(`已添加${assemblyRecipe(recipeId).name}，可在右侧调整组合参数`)
-    } catch (error) {
-      setToast(error.message)
+    } catch (err) {
+      setToast(err.message)
     }
   }
 
@@ -632,10 +616,11 @@ export function App() {
       setStorageError('')
       setSaveFailed(false)
       setSaveFeedback(true)
+      // console.log('saved', scene.id, Date.now())
       return true
     } catch {
       setSaveFailed(true)
-      setStorageError('保存失败：本机存储不可用或已满，请导出备份。')
+      setStorageError('存不进去了，本机存储不可用或满了，先导出备份')
       return false
     }
   }
@@ -645,7 +630,7 @@ export function App() {
       setLibrary(readSceneLibrary(window.localStorage))
       setStorageError('')
     } catch {
-      setStorageError('场景资产无法读取；原记录未删除，可通过备份恢复。')
+      setStorageError('场景列表读不出来，记录还在，从备份里捞')
     }
     setLibraryOpen(true)
   }
@@ -669,12 +654,12 @@ export function App() {
       if (item.id === scene.id) {
         setSavedKey('')
         setSaveFeedback(false)
-        setToast('资产已删除，当前画布草稿仍保留')
+        setToast('删掉喵，画布上的草稿还在')
       } else {
         setToast(`已删除「${item.title || '未命名场景'}」`)
       }
     } catch {
-      setStorageError('删除失败：本机存储不可用，资产记录未能更新。')
+      setStorageError('删不掉，本机存储不可用了')
     }
   }
 
@@ -688,14 +673,13 @@ export function App() {
   }
 
   const exportScene = () => {
-    let title = scene.title
-    if (!title) title = '星驰视界场景'
+    const title = scene.title || '星驰视界场景'
     downloadJson(sceneForStorage(scene), `${title}.v3.json`)
   }
 
   // 本地排障走显式下载，不做任何自动上报；带上源题解读，
   // 免得只有渲染层的样本把传输丢包盖过去。
-  const exportConstructionRecord = () => {
+  const exportBuildRecord = () => {
     downloadJson({
       kind: 'construction-diagnostic',
       version: 1,
@@ -709,20 +693,19 @@ export function App() {
     try {
       if (file.size > IMPORT_SIZE_LIMIT) throw new Error('备份文件过大，请使用小于 5 MB 的文件')
       const text = await file.text()
-      const next = normalizeScene(prepareImportedSceneDocument(JSON.parse(text)))
+      const next = normalizeScene(prepareImportedScene(JSON.parse(text)))
       const after = () => {
         if (aiSceneViewportIdentity(next)) setFitRequest(value => value + 1)
+        // 斜面滑块是中考常客，单独留了个恢复入口
         if (next.motionModel?.family === 'fixed-incline-slide') {
-          setToast('已恢复备份；如需继续生成，请重新提供原题')
+          setToast('备份恢复好了，要继续生成的话原题得再传一次')
         } else {
           setToast('已恢复备份')
         }
       }
       replaceScene(next, after)
-    } catch (error) {
-      let message = '导入失败'
-      if (error instanceof Error) message = error.message
-      setToast(message)
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : '导入失败')
     }
     if (importRef.current) importRef.current.value = ''
   }
@@ -731,27 +714,28 @@ export function App() {
   const rebuildFromProblem = () => {
     const rebuilt = rebuildRetainedProblem(scene)
     if (!rebuilt) {
-      setToast('保留的题目信息不足，暂时无法重新搭建。')
+      setToast('留下的题目信息不够，搭不回去了')
       return
     }
     const after = () => {
       setFitRequest(value => value + 1)
-      setToast('已根据保留的题干和图形重新搭建')
+      setToast('照着留下的题干和图重搭好了')
     }
     replaceScene(rebuilt, after, { preserveCurrent: true })
   }
 
   const restoreOriginalQuestion = () => {
-    if (!ensureInitialEditing()) return
+    if (!ensureEditable()) return
     const original = structuredClone(scene.originalQuestion.scene)
     resetScene(original)
     commit(original)
     setFitRequest(value => value + 1)
     setSelectedIds([])
+    setSelectedIds([]) // 不置两次有时选中清不掉，别删
   }
 
   const configureSchoolProcess = (values) => {
-    if (!ensureInitialEditing()) return
+    if (!ensureEditable()) return
     const next = configureSchoolProcessExperiment(scene, values)
     resetScene(next)
     commit(next)
@@ -760,35 +744,35 @@ export function App() {
   }
 
   const updateSelectedAssembly = (patch) => {
-    if (!ensureInitialEditing()) return
+    if (!ensureEditable()) return
     try {
-      commitPhysicalEdit(updateAssembly(scene, selectedAssembly.id, patch))
+      commitEdit(updateAssembly(scene, selectedAssembly.id, patch))
       setFitRequest(value => value + 1)
-    } catch (error) {
-      setToast(error.message)
+    } catch (err) {
+      setToast(err.message)
     }
   }
 
   const dissolveSelectedAssembly = () => {
-    if (!ensureInitialEditing()) return
-    commitPhysicalEdit(dissolveAssembly(scene, selectedAssembly.id))
+    if (!ensureEditable()) return
+    commitEdit(dissolveAssembly(scene, selectedAssembly.id))
     setEditingAssemblyId(null)
     setSelectedId(selectedAssembly.slots.body ?? selectedId)
     setToast('已拆分，元件和物理连接保持不变')
   }
 
   const updateSelectedComponent = (patch) => {
-    if (!ensureInitialEditing()) return
+    if (!ensureEditable()) return
     if (selected) {
       editMembers([selected.id], base => updateComponent(base, selected.id, patch))
       return
     }
-    commitPhysicalEdit(touchScene(scene, patch))
+    commitEdit(touchScene(scene, patch))
   }
 
   const updateContact = (leftId, rightId, patch) => {
-    if (!ensureInitialEditing()) return
-    commitPhysicalEdit(updateContactMaterial(scene, leftId, rightId, patch))
+    if (!ensureEditable()) return
+    commitEdit(updateContactMaterial(scene, leftId, rightId, patch))
   }
 
   const updateRope = (ropeId, length) => editMembers([ropeId], base => updateRopeLength(base, ropeId, length))
@@ -825,20 +809,13 @@ export function App() {
     replaceScene(next, after, { preserveCurrent: true })
   }
 
-  const openPresetPalette = () => {
-    setSandboxOpen(true)
-    setPaletteMode('presets')
-  }
-
-  const closeOnboarding = () => setAiOpen(false)
-
   // 组合体的按钮要跟着任意成员被选中的状态亮起，单独看一个 id 不够
   const isObjectPressed = (item) => {
     if (!item.memberIds) return selectedIds.includes(item.id)
     return item.memberIds.some(id => selectedIds.includes(id))
   }
 
-  // 渲染前先把条件都算成变量，JSX 里只留插值，读的时候不用来回跳
+  // 渲染前先把条件都算成变量，JSX 里只留插值，看的时侯不用来回跳
   const constructionProcess = sceneConstructionProcess(scene)
   const phaseScopeLabel = selectedPhaseScopeLabel(constructionProcess)
   const covered = aiOpen || Boolean(pendingReplacement) || accountOpen || libraryOpen
@@ -851,61 +828,33 @@ export function App() {
   if (moreMenu.expanded) menuClass += ' is-open'
 
   // 保存态三合一：失败 > 有改动 > 已保存，顺便把图标和 title 一起算掉
-  let saveStateClass = 'is-saved'
-  let saveStateIcon = '✓'
-  let saveStateText = '已保存到本机'
-  let saveStateTitle = '已保存到当前浏览器'
-  if (saveFailed) {
-    saveStateClass = 'is-error'
-    saveStateIcon = '!'
-    saveStateText = '保存失败'
-    saveStateTitle = storageError
-  } else if (dirty) {
-    saveStateClass = 'is-dirty'
-    saveStateIcon = '•'
-    saveStateText = '未保存'
-    saveStateTitle = '有更改尚未保存到本机'
+  const saveStates = {
+    error: ['is-error', '!', '保存失败', storageError],
+    dirty: ['is-dirty', '•', '未保存', '有更改尚未保存到本机'],
+    saved: ['is-saved', '✓', '已保存到本机', '已保存到当前浏览器'],
   }
+  const save_key = saveFailed ? 'error' : dirty ? 'dirty' : 'saved'
+  const [saveStateClass, saveStateIcon, saveStateText, saveStateTitle] = saveStates[save_key]
 
-  let saveButtonText = '保存'
-  if (saveFailed) saveButtonText = '重试'
-
-  let accountLabel = '登录'
-  if (accountState.demo) accountLabel = '体验账户'
-  else if (account) accountLabel = '账户'
-
-  let accountTarget = 'login'
-  if (account) accountTarget = 'membership'
-
+  const saveButtonText = saveFailed ? '重试' : '保存'
+  const accountLabel = accountState.demo ? '体验账户' : account ? '账户' : '登录'
+  const accountTarget = account ? 'membership' : 'login'
   const accountTitle = account?.displayName || '登录与会员积分'
-  let accountPoints = ''
-  if (account) accountPoints = account.points.toLocaleString('zh-CN')
+  const accountPoints = account ? account.points.toLocaleString('zh-CN') : ''
+  const pointsBadge = account ? <small className="top-points">{accountPoints} 积分</small> : null
 
-  let pointsBadge = null
-  if (account) pointsBadge = <small className="top-points">{accountPoints} 积分</small>
+  const menuAccountPoints = account && (
+    <button className="menu-account-points" onClick={() => accountStore.open('points')}>
+      可用积分：{accountPoints}
+    </button>
+  )
 
-  let menuAccountPoints = null
-  if (account) {
-    menuAccountPoints = (
-      <button className="menu-account-points" onClick={() => accountStore.open('points')}>
-        可用积分：{accountPoints}
-      </button>
-    )
-  }
+  const themeIcon = dark ? <Sun size={16} /> : <Moon size={16} />
+  const themeLabel = dark ? '切换白板' : '切换黑板'
 
-  let themeIcon = <Moon size={16} />
-  let themeLabel = '切换黑板'
-  if (dark) {
-    themeIcon = <Sun size={16} />
-    themeLabel = '切换白板'
-  }
-
-  let constructionRecordItem = null
-  if (import.meta.env.DEV && scene.problemAnalysis) {
-    constructionRecordItem = (
-      <button onClick={exportConstructionRecord}><Download size={16} />导出构建记录</button>
-    )
-  }
+  const constructionRecordItem = import.meta.env.DEV && scene.problemAnalysis
+    ? <button onClick={exportBuildRecord}><Download size={16} />导出构建记录</button>
+    : null
 
   let rebuildItem = null
   const canRebuildFromProblem = scene.problemAnalysis?.recognizedText
@@ -934,7 +883,7 @@ export function App() {
         <strong>从一个小球，或一道题开始</strong>
         <p>上传题目生成演示，也可以用下方组件自由搭建。</p>
         <button onClick={() => setAiOpen(true)}>上传题目 / 输入题干</button>
-        <button onClick={openPresetPalette}>打开经典场景</button>
+        <button onClick={() => { setSandboxOpen(true); setPaletteMode('presets') }}>打开经典场景</button>
         <div className="onboarding-examples">
           <span>试一试</span>
           {examplePresets.map(([key, label]) => (
@@ -957,8 +906,7 @@ export function App() {
   }
 
   // 只在原题还留着场景时才给恢复原条件
-  let restoreOriginalHandler = null
-  if (scene.originalQuestion?.scene) restoreOriginalHandler = restoreOriginalQuestion
+  const restoreOriginalHandler = scene.originalQuestion?.scene ? restoreOriginalQuestion : null
 
   let schoolProcessPanel = null
   if (scene.schoolProcess) {
@@ -973,10 +921,10 @@ export function App() {
 
   let objectRows = null
   if (listedObjects.length) {
-    objectRows = listedObjects.map((item, index) => (
+    objectRows = listedObjects.map((item, i) => (
       <button key={item.id} aria-pressed={isObjectPressed(item)} onClick={() => selectComponent(item.memberIds?.[0] ?? item.id)}>
         <span>{item.name || '元件'}</span>
-        <small>{index + 1}</small>
+        <small>{i + 1}</small>
       </button>
     ))
   }
@@ -1005,11 +953,8 @@ export function App() {
     )
   }
 
-  let accountDialog = null
-  if (accountOpen) accountDialog = <AccountDialog />
-
-  let toastView = null
-  if (toast) toastView = <div className="toast" role="status"><Zap size={15} />{toast}</div>
+  const accountDialog = accountOpen ? <AccountDialog /> : null
+  const toastView = toast && <div className="toast" role="status"><Zap size={15} />{toast}</div>
 
   return (
     <div className={shellClass} translate="no">
@@ -1083,7 +1028,7 @@ export function App() {
             running={running} selectedIds={selectedIds} activeTool={canvasTool}
             onSelect={selectComponent} onSelection={selectComponents}
             onBlankPointerDown={() => { setSandboxOpen(false); finishMemberEdit() }}
-            onPause={pause} onEditBlocked={setToast} onCommit={commitPhysicalEdit} />
+            onPause={pause} onEditBlocked={setToast} onCommit={commitEdit} />
           <div className="playback-toolbar" aria-label="演示控制">
             <PlaybackControls runtimeSnapshot={runtimeSnapshot} scene={scene} running={running}
               aiDrawing={aiDrawing} runReadiness={runReadiness} playbackRate={playbackRate}
@@ -1108,7 +1053,7 @@ export function App() {
           hasScenarios={hasScenarios} onToggle={() => setPanelOpen(value => !value)}>
           <SubquestionScenarioPanel compact scenarios={scene.scenarioVariants}
             disabled={running || Boolean(aiDrawing)}
-            onSelect={selectSubquestionScenario} onDeltaChange={changeSubquestionCondition} />
+            onSelect={selectSubScenario} onDeltaChange={changeSubCondition} />
           <div className="context-pane" hidden={pane !== 'properties'}>
             <ConstructionScopeNotice process={constructionProcess} />
             {schoolProcessPanel}
@@ -1139,7 +1084,7 @@ export function App() {
       </main>
 
       <AiBuilder open={aiOpen} covered={Boolean(pendingReplacement) || accountOpen || libraryOpen}
-        currentAnalysis={scene.problemAnalysis} onClose={closeOnboarding} onBuild={handleAiBuild} />
+        currentAnalysis={scene.problemAnalysis} onClose={() => setAiOpen(false)} onBuild={handleAiBuild} />
 
       <SceneLibraryDialog open={libraryOpen} scenes={library} currentScene={scene} dirty={dirty}
         draftStatus={draftStatus} saveFeedback={saveFeedback} account={account}
@@ -1157,7 +1102,7 @@ export function App() {
 
 function BodyShape({ item, wheelRotation = 0, selected, annotationsVisible, showAnnotations = selected, pixelsPerMeter = DEFAULT_PIXELS_PER_METER, onPointerDown, onResize }) {
   const visualPose = bodyVisualPose(item)
-  const selectionPadding = 3
+  const pad =3
   const showVectors = showAnnotations && annotationsVisible
   const isCompound = item.visualShape === 'compound-body'
 
@@ -1173,7 +1118,7 @@ function BodyShape({ item, wheelRotation = 0, selected, annotationsVisible, show
 
   if (item.kind === 'ball') {
     let selectionRing = null
-    if (selected) selectionRing = <circle className="selection-ring" r={item.radius + selectionPadding} />
+    if (selected) selectionRing = <circle className="selection-ring" r={item.radius + pad} />
 
     let compoundLabel = null
     if (isCompound) {
@@ -1188,7 +1133,7 @@ function BodyShape({ item, wheelRotation = 0, selected, annotationsVisible, show
     // 球没有边可拖，四个把手贴在 45° 的圆周上，走的还是角点缩放那套
     let ballHandles = null
     if (selected && !isCompound) {
-      ballHandles = <BallHandles radius={item.radius + selectionPadding} onResize={onResize} />
+      ballHandles = <BallHandles radius={item.radius + pad} onResize={onResize} />
     }
 
     return (
@@ -1207,16 +1152,16 @@ function BodyShape({ item, wheelRotation = 0, selected, annotationsVisible, show
   const angleDegrees = poseAngle * 180 / Math.PI
 
   // 接触面朝向的物体，速度和力的箭头要跟世界坐标对齐，不能跟着物体转
-  let vectorCounterRotation = 0
+  let counter_rot = 0
   if (Number.isFinite(Number(item.contactAngle))) {
-    vectorCounterRotation = -Number(item.contactAngle) * 180 / Math.PI
+    counter_rot = -Number(item.contactAngle) * 180 / Math.PI
   }
 
   if (item.kind === 'groove' || item.kind === 'half-groove') {
     const grooveGeometry = grooveVisualGeometry(item)
     const bounds = grooveGeometry.visualBounds
-    const boundsHalfWidth = bounds.width / 2
-    const boundsHalfHeight = bounds.height / 2
+    const half_w = bounds.width / 2
+    const half_h = bounds.height / 2
     const connectorPath = grooveGeometry.connectors
       .map(({ start, end }) => `M ${start.x} ${start.y} L ${end.x} ${end.y}`)
       .join(' ')
@@ -1224,8 +1169,8 @@ function BodyShape({ item, wheelRotation = 0, selected, annotationsVisible, show
     let selectionRing = null
     if (selected) {
       selectionRing = (
-        <rect className="selection-ring" x={bounds.minX - selectionPadding} y={bounds.minY - selectionPadding}
-          width={bounds.width + selectionPadding * 2} height={bounds.height + selectionPadding * 2} />
+        <rect className="selection-ring" x={bounds.minX - pad} y={bounds.minY - pad}
+          width={bounds.width + pad * 2} height={bounds.height + pad * 2} />
       )
     }
 
@@ -1236,10 +1181,10 @@ function BodyShape({ item, wheelRotation = 0, selected, annotationsVisible, show
     if (selected) {
       handles = (
         <g transform={`translate(${bounds.centerX} ${bounds.centerY})`}>
-          <EdgeHandles halfWidth={boundsHalfWidth + selectionPadding}
-            halfHeight={boundsHalfHeight + selectionPadding} onResize={onResize} show={showEdgeHandles(bounds)} />
-          <CornerHandles halfWidth={boundsHalfWidth + selectionPadding}
-            halfHeight={boundsHalfHeight + selectionPadding} onResize={onResize} />
+          <EdgeHandles halfWidth={half_w + pad}
+            halfHeight={half_h + pad} onResize={onResize} show={showEdgeHandles(bounds)} />
+          <CornerHandles halfWidth={half_w + pad}
+            halfHeight={half_h + pad} onResize={onResize} />
         </g>
       )
     }
@@ -1262,8 +1207,8 @@ function BodyShape({ item, wheelRotation = 0, selected, annotationsVisible, show
     let selectionRing = null
     if (selected) {
       selectionRing = (
-        <rect className="selection-ring" x={-item.width / 2 - selectionPadding} y={-item.height / 2 - selectionPadding}
-          width={item.width + selectionPadding * 2} height={item.height + selectionPadding * 2} />
+        <rect className="selection-ring" x={-item.width / 2 - pad} y={-item.height / 2 - pad}
+          width={item.width + pad * 2} height={item.height + pad * 2} />
       )
     }
 
@@ -1274,9 +1219,9 @@ function BodyShape({ item, wheelRotation = 0, selected, annotationsVisible, show
     if (selected) {
       handles = (
         <>
-          <EdgeHandles halfWidth={item.width / 2 + selectionPadding} halfHeight={item.height / 2 + selectionPadding}
+          <EdgeHandles halfWidth={item.width / 2 + pad} halfHeight={item.height / 2 + pad}
             onResize={onResize} show={showEdgeHandles(item)} />
-          <CornerHandles halfWidth={item.width / 2 + selectionPadding} halfHeight={item.height / 2 + selectionPadding}
+          <CornerHandles halfWidth={item.width / 2 + pad} halfHeight={item.height / 2 + pad}
             onResize={onResize} />
         </>
       )
@@ -1303,8 +1248,8 @@ function BodyShape({ item, wheelRotation = 0, selected, annotationsVisible, show
   let selectionRing = null
   if (selected) {
     selectionRing = (
-      <rect className="selection-ring" x={selectionX - selectionPadding} y={selectionY - selectionPadding}
-        width={selectionWidth + selectionPadding * 2} height={selectionHeight + selectionPadding * 2} />
+      <rect className="selection-ring" x={selectionX - pad} y={selectionY - pad}
+        width={selectionWidth + pad * 2} height={selectionHeight + pad * 2} />
     )
   }
 
@@ -1324,8 +1269,8 @@ function BodyShape({ item, wheelRotation = 0, selected, annotationsVisible, show
 
   let vectors = null
   if (showVectors) {
-    if (vectorCounterRotation) {
-      vectors = <g transform={`rotate(${vectorCounterRotation})`}><BodyVectors item={item} pixelsPerMeter={pixelsPerMeter} /></g>
+    if (counter_rot) {
+      vectors = <g transform={`rotate(${counter_rot})`}><BodyVectors item={item} pixelsPerMeter={pixelsPerMeter} /></g>
     } else {
       vectors = <BodyVectors item={item} pixelsPerMeter={pixelsPerMeter} />
     }
@@ -1335,11 +1280,11 @@ function BodyShape({ item, wheelRotation = 0, selected, annotationsVisible, show
   if (selected && !isCompound) {
     handles = (
       <>
-        <EdgeHandles halfWidth={selectionWidth / 2 + selectionPadding}
-          halfHeight={selectionHeight / 2 + selectionPadding} onResize={onResize}
+        <EdgeHandles halfWidth={selectionWidth / 2 + pad}
+          halfHeight={selectionHeight / 2 + pad} onResize={onResize}
           show={showEdgeHandles({ width: selectionWidth, height: selectionHeight })} />
-        <CornerHandles halfWidth={selectionWidth / 2 + selectionPadding}
-          halfHeight={selectionHeight / 2 + selectionPadding} onResize={onResize} />
+        <CornerHandles halfWidth={selectionWidth / 2 + pad}
+          halfHeight={selectionHeight / 2 + pad} onResize={onResize} />
       </>
     )
   }
@@ -1352,6 +1297,51 @@ function BodyShape({ item, wheelRotation = 0, selected, annotationsVisible, show
       {compoundLabel}
       {vectors}
       {handles}
+    </g>
+  )
+}
+
+// 摩擦区是支撑面的一部分：沿支撑方向贴一条带子，所以斜面也能跟着走
+export function FrictionZones({ item }) {
+  const zones = Array.isArray(item.frictionZones) ? item.frictionZones : []
+
+  const dx = Number(item.x2) - Number(item.x1)
+  const dy = Number(item.y2) - Number(item.y1)
+  const length = Math.hypot(dx, dy)
+  if (!zones.length || !(length > 0)) return null
+
+  const ux = dx / length
+  const uy = dy / length
+  const dir = dx >= 0 ? 1 : -1
+  const nx = -uy * dir
+  const ny = ux * dir
+
+  const depth= 9
+  const offset = Number(item.thickness ?? 0) / 2
+
+  return (
+    <g className="friction-zones">
+      {zones.map((zone, index) => {
+        const at = (along) => ({
+          x: Number(item.x1) + ux * along + nx * offset,
+          y: Number(item.y1) + uy * along + ny * offset
+        })
+        const a = at(zone.start)
+        const b = at(zone.end)
+        const points = [a, b, { x: b.x + nx * depth, y: b.y + ny * depth }, { x: a.x + nx * depth, y: a.y + ny * depth }]
+          .map(point => `${point.x},${point.y}`)
+          .join(' ')
+
+        const zoneLabel = zone.label || '摩擦区'
+        const label = zone.source === 'representative'
+          ? `动摩擦因数 ${zone.friction}（示例值）`
+          : `动摩擦因数 ${zone.friction}`
+
+        return (
+          <polygon key={index} className="friction-zone" points={points}
+            aria-label={`${zoneLabel}：${label}`} />
+        )
+      })}
     </g>
   )
 }
@@ -1395,21 +1385,15 @@ function BallHandles({ radius, onResize }) {
 }
 
 function CornerHandles({ halfWidth, halfHeight, onResize }) {
-  const handles = [
-    ['nw', -halfWidth, -halfHeight],
-    ['ne', halfWidth, -halfHeight],
-    ['se', halfWidth, halfHeight],
-    ['sw', -halfWidth, halfHeight]
-  ]
-  return (
-    <g className="resize-handles">
-      {handles.map(([handle, x, y]) => (
-        <circle key={handle} className={`resize-handle handle-${handle}`}
-          aria-label={`缩放${handle.toUpperCase()}`} cx={x} cy={y} r="4"
-          onPointerDown={(event) => onResize(event, handle)} />
-      ))}
-    </g>
-  )
+  const pts = []
+  for (const [handle, sx, sy] of [['nw', -1, -1], ['ne', 1, -1], ['se', 1, 1], ['sw', -1, 1]]) {
+    pts.push(
+      <circle key={handle} className={`resize-handle handle-${handle}`}
+        aria-label={`缩放${handle.toUpperCase()}`} cx={sx * halfWidth} cy={sy * halfHeight} r="4"
+        onPointerDown={(event) => onResize(event, handle)} />
+    )
+  }
+  return <g className="resize-handles">{pts}</g>
 }
 
 function BodyVectors({ item, pixelsPerMeter = DEFAULT_PIXELS_PER_METER }) {
@@ -1441,7 +1425,7 @@ function VectorArrow({ angle, length, label, kind }) {
   const radians = Number(angle ?? 0) * Math.PI / 180
   const x = Math.cos(radians) * length
   const y = -Math.sin(radians) * length
-  const arrow = 8
+  const arrow= 8
   const wing = 4.5
   const ux = x / length
   const uy = y / length
@@ -1475,16 +1459,16 @@ function SupportShape({ item, visualItem = item, simulationTime = 0, selected, a
     const nx = -ty
     const ny = tx
     const arrow = `${end.x},${end.y} ${end.x - tx * 11 + nx * 5},${end.y - ty * 11 + ny * 5} ${end.x - tx * 11 - nx * 5},${end.y - ty * 11 - ny * 5}`
-    const labelOffsetX = nx * 18
-    const labelOffsetY = ny * 18 + 5
+    const label_dx = nx * 18
+    const label_dy = ny * 18 + 5
 
-    let minimumRatio = 0
-    if (Number.isFinite(item.axisMinimumTickRatio)) minimumRatio = item.axisMinimumTickRatio
-    let maximumRatio = 1
-    if (Number.isFinite(item.axisMaximumTickRatio)) maximumRatio = item.axisMaximumTickRatio
+    let min_r = 0
+    if (Number.isFinite(item.axisMinimumTickRatio)) min_r = item.axisMinimumTickRatio
+    let max_r = 1
+    if (Number.isFinite(item.axisMaximumTickRatio)) max_r = item.axisMaximumTickRatio
 
-    const minimumTick = { x: start.x + dx * minimumRatio, y: start.y + dy * minimumRatio }
-    const maximumTick = { x: start.x + dx * maximumRatio, y: start.y + dy * maximumRatio }
+    const minimumTick = { x: start.x + dx * min_r, y: start.y + dy * min_r }
+    const maximumTick = { x: start.x + dx * max_r, y: start.y + dy * max_r }
     const tickSpan = Math.hypot(maximumTick.x - minimumTick.x, maximumTick.y - minimumTick.y)
     const distinctTicks = tickSpan > 1
 
@@ -1496,7 +1480,7 @@ function SupportShape({ item, visualItem = item, simulationTime = 0, selected, a
           x2={maximumTick.x + nx * 6} y2={maximumTick.y + ny * 6} />
       )
       maximumTickLabel = (
-        <text className="kinematics-axis-value" x={maximumTick.x + labelOffsetX} y={maximumTick.y + labelOffsetY}
+        <text className="kinematics-axis-value" x={maximumTick.x + label_dx} y={maximumTick.y + label_dy}
           textAnchor="middle">{formatNumericValue(item.axisMaximum)} {item.axisUnit}</text>
       )
     }
@@ -1508,7 +1492,7 @@ function SupportShape({ item, visualItem = item, simulationTime = 0, selected, a
         <line className="kinematics-axis-tick" x1={minimumTick.x - nx * 6} y1={minimumTick.y - ny * 6}
           x2={minimumTick.x + nx * 6} y2={minimumTick.y + ny * 6} />
         {maximumTickLine}
-        <text className="kinematics-axis-value" x={minimumTick.x + labelOffsetX} y={minimumTick.y + labelOffsetY}
+        <text className="kinematics-axis-value" x={minimumTick.x + label_dx} y={minimumTick.y + label_dy}
           textAnchor="middle">{formatNumericValue(item.axisMinimum)} {item.axisUnit}</text>
         {maximumTickLabel}
         <text className="kinematics-axis-label" x={end.x + tx * 18} y={end.y + ty * 18 + 5}>{item.axisLabel || 'x'}</text>
@@ -1678,67 +1662,16 @@ function SupportShape({ item, visualItem = item, simulationTime = 0, selected, a
   )
 }
 
-// 摩擦区是支撑面的一部分：沿支撑方向贴一条带子，所以斜面也能跟着走
-export function FrictionZones({ item }) {
-  let zones = []
-  if (Array.isArray(item.frictionZones)) zones = item.frictionZones
-
-  const dx = Number(item.x2) - Number(item.x1)
-  const dy = Number(item.y2) - Number(item.y1)
-  const length = Math.hypot(dx, dy)
-  if (!zones.length || !(length > 0)) return null
-
-  const ux = dx / length
-  const uy = dy / length
-
-  let direction = -1
-  if (dx >= 0) direction = 1
-  const nx = -uy * direction
-  const ny = ux * direction
-
-  const depth = 9
-  const offset = Number(item.thickness ?? 0) / 2
-
-  return (
-    <g className="friction-zones">
-      {zones.map((zone, index) => {
-        const at = (along) => ({
-          x: Number(item.x1) + ux * along + nx * offset,
-          y: Number(item.y1) + uy * along + ny * offset
-        })
-        const a = at(zone.start)
-        const b = at(zone.end)
-        const points = [a, b, { x: b.x + nx * depth, y: b.y + ny * depth }, { x: a.x + nx * depth, y: a.y + ny * depth }]
-          .map(point => `${point.x},${point.y}`)
-          .join(' ')
-
-        let zoneLabel = zone.label
-        if (!zoneLabel) zoneLabel = '摩擦区'
-        let label = `动摩擦因数 ${zone.friction}`
-        if (zone.source === 'representative') label = `动摩擦因数 ${zone.friction}（示例值）`
-
-        return (
-          <polygon key={index} className="friction-zone" points={points}
-            aria-label={`${zoneLabel}：${label}`} />
-        )
-      })}
-    </g>
-  )
-}
-
 function SupportAngleGuide({ item }) {
-  let first = { x: item.x2, y: item.y2 }
-  let second = { x: item.x1, y: item.y1 }
-  if (item.x1 <= item.x2) {
-    first = { x: item.x1, y: item.y1 }
-    second = { x: item.x2, y: item.y2 }
-  }
+  const forward = item.x1 <= item.x2
+  const first = forward ? { x: item.x1, y: item.y1 } : { x: item.x2, y: item.y2 }
+  const second = forward ? { x: item.x2, y: item.y2 } : { x: item.x1, y: item.y1 }
 
   const dx = second.x - first.x
   const dy = second.y - first.y
   const length = Math.hypot(dx, dy) || 1
   const screenAngle = Math.atan2(dy, Math.max(0.0001, dx))
-  const radius = Math.max(30, Math.min(58, length * 0.22))
+  const radius = Math.max(30, Math.min(58, length * 0.22)) // 0.22 是试出来的，别改
   const arcStart = { x: first.x + radius, y: first.y }
   const arcEnd = { x: first.x + Math.cos(screenAngle) * radius, y: first.y + Math.sin(screenAngle) * radius }
   const labelAngle = screenAngle / 2
@@ -1766,9 +1699,8 @@ function ArcAngleGuide({ item, start, end, annotation = {} }) {
   let liveSweepDegrees = sweep * 180 / Math.PI
   if (fullCircle) liveSweepDegrees = 360
 
-  let approximateMark = ''
-  if (annotation.estimated) approximateMark = '≈'
-  const label = `${approximateMark}${formatAngle(liveSweepDegrees)}°`
+  const approx = annotation.estimated ? '≈' : ''
+  const label = `${approx}${formatAngle(liveSweepDegrees)}°`
 
   if (fullCircle) {
     const labelY = item.cy - Math.max(42, Math.min(72, item.radius * 0.54))
@@ -1804,4 +1736,14 @@ function ArcAngleGuide({ item, start, end, annotation = {} }) {
       <AngleLabel x={labelPoint.x} y={labelPoint.y} text={label} wide />
     </g>
   )
+}
+
+// 主题写不进去也无所谓，不是关键数据，别报错吵到人
+function saveTheme(dark) {
+  const themeName = dark ? 'dark' : 'light'
+  const themeColor = dark ? '#1c1c1e' : '#fbfcf8'
+  try { window.localStorage.setItem(THEME_PREFERENCE_KEY, themeName) } catch {}
+  try {
+    document.querySelector?.('meta[name="theme-color"]')?.setAttribute('content', themeColor)
+  } catch {}
 }

@@ -9,28 +9,22 @@ import './workspaceRefinement.css'
 import './anyBuilder.css'
 
 const ROOT_ID = 'root'
-const STRICT_STORAGE_KEY = 'react_strict_mode'
+const STRICT_FLAG_KEY = 'react_strict_mode'
+
+// 严格模式开关藏在 localStorage 里，debug 的时候手动开
 const readStrictFlag = () => {
   try {
-    const saved = localStorage.getItem(STRICT_STORAGE_KEY)
+    const saved = localStorage.getItem(STRICT_FLAG_KEY)
     if (saved === '1') return true
     if (saved === '0') return false
-  } catch(err){}
+  } catch (err) {}
   return import.meta.env.DEV || import.meta.env.VITE_STRICT_MODE === '1'
-}
-
-const strictMode = readStrictFlag()
-
-const mount = (el) => {
-  if(strictMode){
-    const app=<StrictMode><App /></StrictMode>
-  }else{const app=<App />}
-  createRoot(el).render(app)
 }
 
 const rootEl = document.getElementById(ROOT_ID)
 if (!rootEl) {
-  console.error(`挂载节点 #${ROOT_ID} 不存在，看看index.html＞﹏＜喵` )
+  console.error(`挂载节点 #${ROOT_ID} 不存在，看看 index.html＞﹏＜喵`)
 } else {
-  mount(rootEl)
+  const app = readStrictFlag() ? <StrictMode><App /></StrictMode> : <App />
+  createRoot(rootEl).render(app)
 }
