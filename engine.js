@@ -16,6 +16,9 @@ import {constraintChangeFamilies,stepConstraintChange} from './constraintChangeE
 import {springShuttleFamily,stepSpringShuttle} from './springShuttle.js'
 import {inclinePlankPassageFamily,stepInclinePlank} from './inclinePlankPassage.js'
 import {observePathCrossings} from './pathObservationEvents.js'
+// 物理引擎。渲染那边每帧调一次 tickWorld，剩下的都是它底下的小工具。
+// 长度一律按像素走，只有算能量和动量的时候才除回去换成米。
+// 别在这里碰 DOM，画布上的事归 BoardCanvas 管。
 const PIXELS_PER_METER = 52
 const EPSILON = 1e-7;
 const MAX_INTERNAL_SUBSTEPS =32
@@ -25,14 +28,18 @@ const G_EPS =1e-9;//备用，之前防NaN用的，后来发现用不上
 const bodyMass = body => Number.isFinite(Number(body?.mass)) && Number(body.mass) > 0
   ? Number(body.mass) : 0.05;
 
+// 建世界的入口。校验 → 拷一份支撑/物体 → 摊开 world → 预连接一次。
+// 场景对象本身不动，全靠 {...item} 拷，编辑器那边还在同时改它。
 export function makeWorld(scene) {
   if (!verifyNativeExperiment(scene).valid) throw new Error('原生实验跟场景对不上，先检查题设')
   checkMotionPrograms(scene)
   if (!checkCarrierScene(scene).valid) throw new Error('储能运动和当前场景对不上')
   if (!checkBounceScene(scene)) throw new Error('反弹运动和当前场景对不上')
+  // 粘合对先一律置成没激活，真粘上是碰撞里判的
   const collisionBindings = fixBindings(scene.collisionBindings, scene.components)
     .map(binding => ({ ...binding, active:false, offset:null }))
   const pixelsPerMeter = Math.max(24, Math.min(260, Number(scene.pixelsPerMeter ?? PIXELS_PER_METER)))
+  // 隐藏的支撑面也留着，图没了碰撞还得在
   const supports = scene.components
     .filter(item => item.role==='support' && item.collisionEnabled!==false)
     .map(item => ({ ...item }))
@@ -49,6 +56,8 @@ export function makeWorld(scene) {
   // 题干写"足够长"的传送带就属于这种：演示走完就算结束，后面的不建模
   const playbackDuration = Number(scene.constructionPlan?.playbackDuration)
   if (Number.isFinite(playbackDuration) && playbackDuration > 0) prescribedDurations.push(playbackDuration)
+  // world 就是这一帧要用的全部状态。字段确实多了点，想过按子系统拆开，
+  // 但那样每帧来回拼更慢，先这么摊着。
   const world = {
     nativeExperiment: scene.nativeExperiment ?? null,
     railProcess: scene.railProcess ?? null,
@@ -112,8 +121,11 @@ export function makeWorld(scene) {
   return world
 }
 
+// 外部只调这个。原生实验有自己的步进器，走完就算完；
+// 其余的按子步切开反复调 tickOnce，最后把接触键合并回去。
 export function tickWorld(world, dt = 1 / 120) {
   if(world.completed)return world;
+
   //本来想把底下这坨calculateMetrics抽出去的，抽了一半先这样
   const sync=()=>calculateMetrics(world,new Map(world.anchors.map(c=>[c.id,c])),new Map(world.bodies.map(c=>[c.id,c])));
   if(world.nativeExperiment?.family===inclinePlankPassageFamily){
@@ -135,6 +147,7 @@ export function tickWorld(world, dt = 1 / 120) {
     sync();
     return world;
   }
+  // 一次切多少内部步，快的场景能切到十几步
   const substeps = subSteps(world, dt);
   if (substeps === 1) return tickOnce(world, dt);
   const contactKeys = new Set();
@@ -152,6 +165,8 @@ export function tickWorld(world, dt = 1 / 120) {
   return world;
 }
 
+// 一个内部步。顺序动不得：外力 → 积分 → 同步粘合 → 扫掠 → 解接触 → 撤力 → 判完成。
+// 换过顺序，扫掠放到解接触后面会漏碰撞。
 function tickOnce(world, dt) {
   world.contacts = 0;
   world.contactKeys.clear();
@@ -159,6 +174,7 @@ function tickOnce(world, dt) {
   world.stepDt = dt;
   const anchors = new Map(world.anchors.map((item) => [item.id, item]));
   const bodies = new Map(world.bodies.map((item) => [item.id, item]));
+  // 弹簧加速度每步只算一次，rideTrack 那边直接复用，省一轮遍历
   const springAccelerations = new Map(world.bodies.map((body) => [
     body.id,
     springAcceleration(body, world.constraints, anchors, bodies),
@@ -168,6 +184,7 @@ function tickOnce(world, dt) {
     ? world.time + dt
     : Math.min(world.prescribedDuration, world.time + dt);
 
+  // 已经挂上圆弧的复合体先整体推走，别一个成员一个成员挪
   for (const compound of world.compounds) {
     if (compound.trackState) comboArc(compound, world, dt, bodies);
   }
@@ -218,6 +235,7 @@ function tickOnce(world, dt) {
     }
   }
 
+  // 原来这里是一长串内联，抽成三个函数了，看着还是有点挤
   syncHyb(world,targetTime,bodies);
   syncBinds(world, bodies);
   sweptStick(world, dt, bodies);
@@ -260,6 +278,7 @@ function tickOnce(world, dt) {
   return world;
 }
 
+// 扫掠粘合：只在声明了 stick-on-contact 且两边都是质点的时候跑
 function sweptStick(world, dt, bodies) {
   // 理想点跑太快，一个子步能整段穿过接触皮。先把扫掠撞上的第一下解掉，
   // 不然题目里明写的碰撞会直接漏过去
@@ -271,6 +290,7 @@ function sweptStick(world, dt, bodies) {
     const startY = b.previousY - a.previousY;
     const endX = b.x - a.x, endY = b.y - a.y;
     const dx = endX - startX, dy = endY - startY;
+    // 相对位移解一元二次，取第一个正根就是撞上的时刻
     const aa = dx * dx + dy * dy, bb = 2 * (startX * dx + startY * dy);
     const cc = startX * startX + startY * startY - 4;
     const discriminant = bb * bb - 4 * aa * cc;
@@ -289,6 +309,7 @@ function sweptStick(world, dt, bodies) {
   }
 }
 
+// 接触求解。多轮迭代是因为一轮解完会顶出新穿透，几轮之后基本收敛
 function contactRounds(world, bodies, anchors) {
   //TODO: 4轮是不是多了，之前试过3轮也能过，懒得改
   for (let iteration = 0; iteration < 4; iteration += 1) {
@@ -299,6 +320,7 @@ function contactRounds(world, bodies, anchors) {
         if (support.kind !== 'arc') resolveCompoundSegment(compound, support, world, bodies)
       }
     }
+    // 第二轮：单体对支撑面。复合体整体解过了，成员跳过
     for (const body of world.bodies) {
       const compound = world.compounds.find(item => item.memberIds.includes(body.id))
       if (compound?.trackState) {
@@ -320,6 +342,7 @@ function contactRounds(world, bodies, anchors) {
       if (world.boundaryMode === 'bounce') resolveBounds(body, world)
     }
 
+    // 两两检查。物体不多，懒得上网格，O(n²) 够用
     for (let left = 0; left < world.bodies.length; left += 1) {
       for (let right = left + 1; right < world.bodies.length; right += 1) {
         if (isPrescribedMotion(world.bodies[left].motionProgram)
@@ -336,10 +359,12 @@ function contactRounds(world, bodies, anchors) {
   }
 }
 
+// 内部子步数。取的是"最远位移 / 最小尺寸"，两头都要顾
 function subSteps(world, dt) {
   if (!Number.isFinite(dt) || dt <= 0) return 1;
   let max_travel = 0;
   let min_extent = Infinity;
+  // 先估这一帧最远跑多远、场景里最小的尺寸是多少
   for (const body of world.bodies) {
     if (body.fixed === true || isPrescribedMotion(body.motionProgram)) continue;
     const speed = Math.hypot(Number(body.vx ?? 0), Number(body.vy ?? 0));
@@ -364,6 +389,7 @@ function subSteps(world, dt) {
 
 const SPRING_PHASE_PER_STEP = 0.05; //ω·dt 每个内部步最多走这么多弧度
 
+// 硬簧单独算。ω·dt 太大会一步把发射器的储能吃掉一大截
 function stiffSpringSubsteps(world, dt) {
   const springs = (world.constraints ?? []).filter(item => item.kind === 'spring' && item.physicsEnabled !== false && Number(item.stiffness) > 0);
   if (!springs.length) return 1;
@@ -385,11 +411,15 @@ function stiffSpringSubsteps(world, dt) {
   return steps;
 }
 
+// 气阻按每秒保留率折算。这样帧长变了结果也不飘，
+// 直接写 1-airDrag 的话 60Hz 和 120Hz 出来两个世界。
 function dragMultiplier(airDrag, dt) {
   const perFrameRetention = Math.max(0, 1 - Math.max(0, Number(airDrag ?? 0)));
   return perFrameRetention ** (Math.max(0, Number(dt ?? 0)) * 60);
 }
 
+// 题目直接把运动给出来的那几种：位置速度照状态函数算，不走受力积分。
+// 事件（到达某点、撤去力）也在这里补进 motionEvents，别的地方别重复推。
 function followProgram(body, world, time) {
   const program = body.motionProgram;
   if (!isPrescribedMotion(program)) return false;
@@ -490,6 +520,7 @@ function followProgram(body, world, time) {
     if(program.model.family==='ramped-force-carrier'&&program.processRole==='block')body.forceMagnitude=program.model.parameters.forceRate*localTime;
     return true;
   }
+  // 竖直弹跳还要额外报地面冲击，接触计数得手动加，不然动画上的碰撞声不响
   if (program.kind==='vertical-bounce') {
     const state = verticalBounceStateAt(program, localTime);
     body.previousX = body.x; body.previousY = body.y;
@@ -538,6 +569,7 @@ function followProgram(body, world, time) {
     body.angle = angle + (w>=0 ? Math.PI/2 : -Math.PI/2)
     return true
   }
+  // 剩下几种都是沿一条轴平动，公式一样，只是加速度来源不同
   const initialPosition = Number(program.initialPosition ?? 0)
   const initialVelocity = Number(program.initialVelocity ?? 0)
   let acceleration = Number(program.acceleration ?? 0)
@@ -579,6 +611,7 @@ function followProgram(body, world, time) {
   return true
 }
 
+// 判断是不是题给运动。这个名单一改，上面 followProgram 也得跟着改
 function isPrescribedMotion(program) {
   //这堆全是题目直接把运动给出来的，位置速度照公式走
   const kinds = ['critical-loop-passage', 'loop-carrier-composition', 'hybrid-process',
@@ -603,6 +636,7 @@ function syncHyb(world,time,bodies){
  });
 }
 
+// 冷却计时，纯粹为了防止刚脱轨又被同一根吸回去
 function updateTrackCooldown(body, dt) {
   //脱离导轨后一小段时间内不再被同一根吸回去
   if (!body.trackCooldown) return;
@@ -610,13 +644,15 @@ function updateTrackCooldown(body, dt) {
   if (body.trackCooldown.remaining <= 0) body.trackCooldown = null;
 }
 
+// 圆的切向，逆时针为正
 function circleTangent(angle) { return { x: -Math.sin(angle), y: Math.cos(angle) } }
-function trackDir(value, fallback) {
+function trackDir(value, fallback) { // 方向字段常常是空的，拿速度符号兜一下
   const number = Number(value)
   if (number === 1 || number === -1) return number
   return Math.sign(Number(fallback)) || 1
 }
 
+// 扫掠里碰到入口就吸上去。条件是位置够近 + 速度方向和入口对齐，缺一个都不吸
 function tryCaptureGuidedTrack(body, world) {
   if (body.trackState) return
   for (const support of world.supports) {
@@ -664,6 +700,7 @@ function tryCaptureGuidedTrack(body, world) {
   }
 }
 
+// 切向速度和是否对齐，两个函数都要用，抽出来省得抄
 function guidedPortalMotion(body, portal, angle) {
   const positiveTangent = circleTangent(angle)
   const tangentSpeed = body.vx * positiveTangent.x + body.vy * positiveTangent.y
@@ -680,6 +717,7 @@ function guidedPortalMotion(body, portal, angle) {
   }
 }
 
+// 只看朝向不看距离：给还没真正贴上去的物体提前判一下，免得先被当墙弹开
 function headingPortal(body, support) {
   if (body.trackState || body.trackCooldown?.supportId === support.id) return false;
   const constraint = trackRule(support);
@@ -723,6 +761,8 @@ function bisectRange(lo,hi,test,rounds){
   return [lo,hi]
 }
 
+// 物体挂在导轨上时的一步。先判脱离，再分两条路：纯恒力走 RK4，
+// 有摩擦或弹簧就退回显式步进。两条路的结果要能对上，改一条记得对一遍另一条。
 function rideTrack(body, world, dt, anchors, bodies, cachedSpringForce = null) {
   const state = body.trackState;
   const support = world.supports.find((item) => item.id === state.supportId);
@@ -741,6 +781,7 @@ function rideTrack(body, world, dt, anchors, bodies, cachedSpringForce = null) {
     x: springForce.x + externalForce.x,
     y: world.gravity + springForce.y + externalForce.y,
   };
+  // 轨道半径跟物体朝向有关，盒子转过之后要重算
   const orbitRadius = guidedOrbitRadius(body, support, previousAngle);
   const externalRadial = externalAcceleration.x * radial.x + externalAcceleration.y * radial.y;
   const constraintAcceleration = -(state.tangentSpeed ** 2) / orbitRadius - externalRadial;
@@ -756,6 +797,7 @@ function rideTrack(body, world, dt, anchors, bodies, cachedSpringForce = null) {
     });
     return;
   }
+  // 圆周运动的题，最高点临界速度几乎是必考，这里判松一点就会误判"没脱离"
   const previousSpeed = state.tangentSpeed;
   const frictionAcceleration = contactFriction(world, body, support) * Math.abs(constraintAcceleration);
   // 配"恰好通过最高点"题拟合出来的等效切向阻力（只有题给力，做的功正好=力×路程）
@@ -795,6 +837,7 @@ function rideTrack(body, world, dt, anchors, bodies, cachedSpringForce = null) {
     if(exit)releaseGuidedBody(body,support,state,exit);
     return;
   }
+  // 有摩擦、气阻或者弹簧的时候退回显式步进：精度差一点，但不会在切换分支上炸
   const tangentAcceleration = externalAcceleration.x*positiveTangent.x + externalAcceleration.y*positiveTangent.y
   const drivenSpeed = state.tangentSpeed + tangentAcceleration * dt
   const frictionDelta = (frictionAcceleration + resistanceAcceleration) * dt
@@ -834,6 +877,7 @@ function rideTrack(body, world, dt, anchors, bodies, cachedSpringForce = null) {
   if (exit) releaseGuidedBody(body, support, state, exit)
 }
 
+// 脱离导轨：位置停在出口角度上，速度只留切向，法向那部分不给
 function releaseGuidedBody(body, support, state, portal) {
   const angle = normalizedAngle(Number(portal.angle));
   const tangent = circleTangent(angle);
@@ -850,7 +894,7 @@ function releaseGuidedBody(body, support, state, portal) {
   body.trackCooldown = { supportId: support.id, remaining: Math.max(0.05, Number(portal.cooldownSeconds ?? 0.12)) };
 }
 
-function markGates(state, checkpoints, previousAngle, nextAngle) {
+function markGates(state, checkpoints, previousAngle, nextAngle) { // 过检查点记一笔，题目要问"经过A点时的速度"就靠这个
   for (const checkpoint of checkpoints) {
     const id = String(checkpoint.id ?? 'checkpoint');
     if (state.visitedCheckpointIds.includes(id)) continue;
@@ -860,6 +904,7 @@ function markGates(state, checkpoints, previousAngle, nextAngle) {
   }
 }
 
+// 出口三件事：转够圈数、方向对、角度确实越过去了
 function canExitGuidedTrack(state, portal, previousAngle, nextAngle) {
   if (Math.abs(nextAngle - previousAngle) < EPSILON) return false;
   const direction = Math.sign(nextAngle - previousAngle);
@@ -873,6 +918,7 @@ function canExitGuidedTrack(state, portal, previousAngle, nextAngle) {
   return passedAngle(previousAngle, nextAngle, Number(portal.angle));
 }
 
+// 导轨约束的合法性检查。顺带把 checkpoints 补成数组，后面就不用到处判空
 function trackRule(support) {
   const value = support?.trackConstraint;
   if (support?.fullCircle !== true && value?.span !== 'open') return null;
@@ -884,6 +930,7 @@ function trackRule(support) {
   };
 }
 
+// 圆上一点。注意半径是轨道半径，不是支撑自己的 radius
 function guidedBodyPoint(body, support, angle) {
   const radius = guidedOrbitRadius(body, support, angle);
   return {
@@ -892,6 +939,7 @@ function guidedBodyPoint(body, support, angle) {
   };
 }
 
+// 槽式导轨走中线；单侧轨道得留出物体自己的半径，不然看着穿模
 function guidedOrbitRadius(body, support, angle) {
   if(support.trackConstraint?.mode==='bilateral-slot'&&support.trackConstraint.reference==='centerline')return Number(support.radius);
   const radialX = Math.cos(angle);
@@ -902,6 +950,7 @@ function guidedOrbitRadius(body, support, angle) {
     : Math.max(1, Number(support.radius) - clearance);
 }
 
+// 把物体摆到导轨上的指定角度。盒子要跟着切向转，不然看着是斜着贴的
 function placeGuidedBody(body, support, angle, tangentSpeed, world) {
   //world 参数是后加的，本来想取气阻，没做，有几个调用点也忘了传
   const point = guidedBodyPoint(body, support, angle);
@@ -913,6 +962,7 @@ function placeGuidedBody(body, support, angle, tangentSpeed, world) {
   body.vy = tangent.y * tangentSpeed;
 }
 
+// 角度会绕圈，得先把目标角挪到这一段区间里再比。这里 off-by-one 踩过，别改成 <=
 function passedAngle(previousAngle, nextAngle, targetAngle) {
   if (!Number.isFinite(targetAngle) || Math.abs(nextAngle - previousAngle) < EPSILON) return false;
   const full = Math.PI * 2;
@@ -927,6 +977,7 @@ function passedAngle(previousAngle, nextAngle, targetAngle) {
   return candidate >= nextAngle - EPSILON;
 }
 
+// 点到线段距离，扫掠判定用
 function distSeg(px, py, x1, y1, x2, y2) {
   const dx = x2 - x1;
   const dy = y2 - y1;
@@ -936,6 +987,7 @@ function distSeg(px, py, x1, y1, x2, y2) {
   return Math.hypot(px - (x1 + dx * t), py - (y1 + dy * t));
 }
 
+// 复合体到圆弧的间隙：每个成员转过去投到法向上，取最大的那个
 function comboGap(compound, support, angle, bodies) {
   if (compound.memberIds.every(id => bodies.get(id)?.physicsGeometry === 'point')) {
     return Math.max(0, Number(support.thickness ?? 0)) / 2;
@@ -951,6 +1003,8 @@ function comboGap(compound, support, angle, bodies) {
   })) + Math.max(0, Number(support.thickness ?? 0)) / 2;
 }
 
+// 复合体上弧比单体麻烦：质心轨迹要按质量加权回推一步，
+// 不然刚粘上的那一帧算出来的扫掠长度是错的。
 function tryCaptureCompoundArc(compound, world, bodies) {
   if (compound.trackState) return;
   const speed = Math.hypot(compound.vx, compound.vy);
@@ -972,7 +1026,7 @@ function tryCaptureCompoundArc(compound, world, bodies) {
       if (!Number.isFinite(angle)) continue;
       const tangent = circleTangent(angle);
       const tangentSpeed = compound.vx * tangent.x + compound.vy * tangent.y;
-      const min_align = clamp(Number(portal?.minTangentAlignment ?? 0.7), 0, 1);
+      const min_align = clamp(Number(portal?.minTangentAlignment ?? 0.7), 0, 1); //0.7 是试出来的，再低斜着进来会突然拐弯
       if (Math.sign(tangentSpeed) !== direction || Math.abs(tangentSpeed) / speed < min_align) continue;
       const clearance = comboGap(compound, support, angle, bodies);
       const radius = support.contactSide === 'outer'
@@ -1004,6 +1058,7 @@ function tryCaptureCompoundArc(compound, world, bodies) {
   }
 }
 
+// 复合体加速度：外力按质量加权，重力直接加，别再乘一遍质量
 function comboAcc(compound, world, members) {
   const external = members.reduce((sum, body) => {
     const mass = bodyMass(body);
@@ -1014,6 +1069,7 @@ function comboAcc(compound, world, members) {
   return { x: external.x / compound.mass, y: world.gravity + external.y / compound.mass };
 }
 
+// 复合体在弧上走一步。摩擦按各成员加权平均，不然轻的拖着重的滑
 function comboArc(compound, world, dt, bodies) {
   const state = compound.trackState;
   const support = world.supports.find(item => item.id === state.supportId);
@@ -1085,6 +1141,7 @@ function comboArc(compound, world, dt, bodies) {
   }
 }
 
+// 写回去的时候角度要跟着弧长一起转，否则箱子上坡一直正着走
 function placeCompoundOnArc(compound, support, bodies) {
   const state = compound.trackState;
   const tangent = circleTangent(state.angle);
@@ -1096,6 +1153,7 @@ function placeCompoundOnArc(compound, support, bodies) {
   putMembers(compound, bodies);
 }
 
+// 记一下从哪儿掉的、什么时候掉的，短时间内别再吸回去
 function releaseCompoundArc(compound, support, world, portal = null) {
   compound.lastTrackExit = { supportId: support.id, time: world.time, angle: compound.trackState.angle,
     portalId: portal ? String(portal.id ?? 'exit') : null,
@@ -1103,12 +1161,15 @@ function releaseCompoundArc(compound, support, world, portal = null) {
   compound.trackState = null;
 }
 
+// 都在轨道上时只跟同一根轨道的碰，不然内外圈会互相穿
 function sharesCollisionLayer(left, right) {
   //都在轨道上时只跟同一根轨道的碰
   if (!left.trackState && !right.trackState) return true;
   return left.trackState?.supportId != null && left.trackState?.supportId === right.trackState?.supportId;
 }
 
+// 题给力。角度按度数存，屏幕 y 轴朝下所以取负，
+// 这个符号错了整个斜抛都是反的。
 function forceAcceleration(body, pixelsPerMeter = PIXELS_PER_METER) {
   const magnitude = Number(body.forceMagnitude ?? 0);
   const angle = Number(body.forceAngle ?? 0) * Math.PI / 180;
@@ -1119,6 +1180,7 @@ function forceAcceleration(body, pixelsPerMeter = PIXELS_PER_METER) {
   };
 }
 
+// 弹簧端点三种来源：挂在物体上（要带局部偏移一起转）、锚点、绝对坐标
 function endPointOf(constraint, endpoint, anchors, bodies) {
   const start = endpoint === 'start';
   const bodyId = start ? constraint.startBodyId : constraint.bodyId;
@@ -1151,6 +1213,7 @@ function endPointOf(constraint, endpoint, anchors, bodies) {
   };
 }
 
+// 接触式弹簧的端点要自己找：沿轴向找最近的一个球或者盒子
 function automaticSpringContact(constraint, endpoint, opposite, bodies) {
   if (!opposite || !Number.isFinite(opposite.x) || !Number.isFinite(opposite.y)) return null;
   const targetId = endpoint === 'start'
@@ -1187,6 +1250,7 @@ function automaticSpringContact(constraint, endpoint, opposite, bodies) {
   return best;
 }
 
+// 找不到接触就按原长摆在轴线上，至少别让弹簧塌成一个点
 function naturalSpringEndpoint(constraint, endpoint, opposite) {
   const storedDx = Number(constraint.endX) - Number(constraint.startX);
   const storedDy = Number(constraint.endY) - Number(constraint.startY);
@@ -1203,6 +1267,7 @@ function naturalSpringEndpoint(constraint, endpoint, opposite) {
 	};
 }
 
+// 两端都定下来。接触式的先解接触，解不出来退自然端点
 function springNow(constraint, anchors, bodies) {
   let start = endPointOf(constraint, 'start', anchors, bodies);
   let end = endPointOf(constraint, 'end', anchors, bodies);
@@ -1217,6 +1282,7 @@ function springNow(constraint, anchors, bodies) {
   return { start, end, startMode, endMode };
 }
 
+// 把作用在这个物体上的弹簧力全加起来，再除以质量当加速度用
 function springAcceleration(body, constraints, anchors, bodies) {
   let fx = 0;
   let fy = 0;
@@ -1246,6 +1312,7 @@ function springAcceleration(body, constraints, anchors, bodies) {
   return { x: fx, y: fy };
 }
 
+// 绳的约束求解，直接改位置和速度，不走力（绳太硬，力会炸）
 function solveRopes(world, anchors, bodies) {
   //绳只能拉不能压，绷直了才管
   for (const constraint of world.constraints) {
@@ -1271,6 +1338,7 @@ function solveRopes(world, anchors, bodies) {
       registerContact(world,start.body.id,constraint.id);registerContact(world,end.body.id,constraint.id);
       continue;
     }
+    // 老的单端绳：直接拽回圆周上，顺手把向外的速度抹掉
     const anchor = anchors.get(constraint.anchorId);
     const body = bodies.get(constraint.bodyId);
     if (!anchor || !body) continue;
@@ -1292,6 +1360,7 @@ function solveRopes(world, anchors, bodies) {
   }
 }
 
+// 复合体对外用一个包围盒表示，尺寸按成员偏移算出来
 function comboShape(compound, world, bodies) {
   const members = compound.memberIds.map(id => bodies.get(id)).filter(Boolean);
   if (members.length !== compound.memberIds.length) return null;
@@ -1325,6 +1394,7 @@ function comboShape(compound, world, bodies) {
     previousVy: weightedPrevious('previousVy', 'vy') };
 }
 
+// 拿包围盒去解支撑面，解完把位移和速度同步回复合体
 function resolveCompoundSegment(compound, support, world, bodies) {
   const contactBody = comboShape(compound, world, bodies);
   if (!contactBody) return;
@@ -1339,6 +1409,7 @@ function resolveCompoundSegment(compound, support, world, bodies) {
   for (const memberId of compound.memberIds) registerContact(world, memberId, support.id);
 }
 
+// 线段支撑的主入口：先把两端裁掉，再按物体类型分派
 function resolveSegment(body, support, world) {
   const dx = support.x2 - support.x1;
   const dy = support.y2 - support.y1;
@@ -1347,28 +1418,29 @@ function resolveSegment(body, support, world) {
   const length = Math.sqrt(lengthSquared);
   const tx = dx / length;
   const ty = dy / length;
-  const infiniteCollisionExtent = support.collisionExtent === 'infinite'
+  const inf_extent = support.collisionExtent === 'infinite'
     || (support.semanticType === 'ground' && support.collisionExtent !== 'finite');
-  const tangentDistance = (body.x - support.x1) * tx + (body.y - support.y1) * ty;
+  const tan_dist = (body.x - support.x1) * tx + (body.y - support.y1) * ty;
   // 往凹槽里画墙时墙一开始是插在地板下面的：视觉/审计端点保留接缝，
   // 碰撞不保留
-  const insetStart = infiniteCollisionExtent ? 0 : Math.max(0, Number(support.collisionInsetStart ?? 0));
-  const insetEnd = infiniteCollisionExtent ? 0 : Math.max(0, Number(support.collisionInsetEnd ?? 0));
+  const insetStart = inf_extent ? 0 : Math.max(0, Number(support.collisionInsetStart ?? 0));
+  const insetEnd = inf_extent ? 0 : Math.max(0, Number(support.collisionInsetEnd ?? 0));
   // 示意质点要等参考点进到线段里才算碰到，
   // 它画出来的矩形/圆不能先把下一个面激活
-  if (body.physicsGeometry === 'point' && !infiniteCollisionExtent
-    && (tangentDistance < insetStart - EPSILON || tangentDistance > length - insetEnd + EPSILON
-      || (tangentDistance <= insetStart + EPSILON && hasConnectedEndpoint(world, support.id, 'start')))) return;
-  const tangentRadius = body.physicsGeometry === 'point' ? 0 : body.kind === 'ball'
+  if (body.physicsGeometry === 'point' && !inf_extent
+    && (tan_dist < insetStart - EPSILON || tan_dist > length - insetEnd + EPSILON
+      || (tan_dist <= insetStart + EPSILON && hasConnectedEndpoint(world, support.id, 'start')))) return;
+  const tan_radius = body.physicsGeometry === 'point' ? 0 : body.kind === 'ball'
     ? Number(body.radius)
     : supportRadius(body, tx, ty);
-  if (!infiniteCollisionExtent && nearJoint(body, support, world, tangentDistance, tangentRadius, length, tx, ty)) return;
+  if (!inf_extent && nearJoint(body, support, world, tan_dist, tan_radius, length, tx, ty)) return;
   if (['box', 'wedge', 'groove', 'half-groove'].includes(body.kind)) {
-    resolveBoxSegment(body, support, world, dx, dy, lengthSquared, infiniteCollisionExtent);
+    resolveBoxSegment(body, support, world, dx, dy, lengthSquared, inf_extent);
     return;
   }
+  // 圆和点：找最近点，法向就是连线方向，重合了才取垂线
   const rawT = ((body.x - support.x1) * dx + (body.y - support.y1) * dy) / lengthSquared;
-  const t = infiniteCollisionExtent ? rawT : clamp(rawT, insetStart / length, (length - insetEnd) / length);
+  const t = inf_extent ? rawT : clamp(rawT, insetStart / length, (length - insetEnd) / length);
   const px = support.x1 + dx * t;
   const py = support.y1 + dy * t;
   let nx = body.x - px;
@@ -1397,7 +1469,8 @@ function resolveSegment(body, support, world) {
   registerContact(world, body.id, support.id);
 }
 
-function resolveBoxSegment(body, support, world, dx, dy, lengthSquared, infiniteCollisionExtent = false) {
+// 盒子撞线段：先把盒子摆正到贴着面，角度变了支撑半径也变，得重算一遍
+function resolveBoxSegment(body, support, world, dx, dy, lengthSquared, inf_extent = false) {
   const length = Math.sqrt(lengthSquared);
   const tx = dx / length;
   const ty = dy / length;
@@ -1410,37 +1483,38 @@ function resolveBoxSegment(body, support, world, dx, dy, lengthSquared, infinite
 
   const relativeX = body.x - support.x1;
   const relativeY = body.y - support.y1;
-  const tangentDistance = relativeX * tx + relativeY * ty;
-  const tangentRadius = body.physicsGeometry === 'point' ? 0 : supportRadius(body, tx, ty);
-  const insetStart = infiniteCollisionExtent ? 0 : Math.max(0, Number(support.collisionInsetStart ?? 0));
-  const insetEnd = infiniteCollisionExtent ? 0 : Math.max(0, Number(support.collisionInsetEnd ?? 0));
-  if (!infiniteCollisionExtent && (body.physicsGeometry === 'point'
-    ? tangentDistance < insetStart - EPSILON || tangentDistance > length - insetEnd + EPSILON
-    : tangentDistance + tangentRadius <= insetStart || tangentDistance - tangentRadius >= length - insetEnd)) return;
+  const tan_dist = relativeX * tx + relativeY * ty;
+  const tan_radius = body.physicsGeometry === 'point' ? 0 : supportRadius(body, tx, ty);
+  const insetStart = inf_extent ? 0 : Math.max(0, Number(support.collisionInsetStart ?? 0));
+  const insetEnd = inf_extent ? 0 : Math.max(0, Number(support.collisionInsetEnd ?? 0));
+  if (!inf_extent && (body.physicsGeometry === 'point'
+    ? tan_dist < insetStart - EPSILON || tan_dist > length - insetEnd + EPSILON
+    : tan_dist + tan_radius <= insetStart || tan_dist - tan_radius >= length - insetEnd)) return;
 
-  const signedNormalDistance = relativeX * nx + relativeY * ny;
+  const sign_dist = relativeX * nx + relativeY * ny;
+  // 零厚度的线对质点得判"这一帧有没有穿过去"，只判穿透的话快的一步就漏了
   if (body.physicsGeometry === 'point' && Math.abs(Number(support.thickness ?? 6)) <= EPSILON) {
-    const previousNormalDistance = (Number(body.previousX ?? body.x) - support.x1) * nx
+    const prev_nd = (Number(body.previousX ?? body.x) - support.x1) * nx
       + (Number(body.previousY ?? body.y) - support.y1) * ny;
     const normalVelocity = body.vx * nx + body.vy * ny;
-    const crossed = (previousNormalDistance > EPSILON && signedNormalDistance <= 0)
-      || (previousNormalDistance < -EPSILON && signedNormalDistance >= 0)
-      || (Math.abs(previousNormalDistance) <= EPSILON && signedNormalDistance <= 0 && normalVelocity < 0);
+    const crossed = (prev_nd > EPSILON && sign_dist <= 0)
+      || (prev_nd < -EPSILON && sign_dist >= 0)
+      || (Math.abs(prev_nd) <= EPSILON && sign_dist <= 0 && normalVelocity < 0);
     if (crossed) {
-      const side = previousNormalDistance < -EPSILON ? -1 : 1;
-      body.x -= signedNormalDistance * nx;
-      body.y -= signedNormalDistance * ny;
+      const side = prev_nd < -EPSILON ? -1 : 1;
+      body.x -= sign_dist * nx;
+      body.y -= sign_dist * ny;
       if (support.kind !== 'wall') body.angle = canonicalBoxAngle(Math.atan2(ty, tx));
       bounceVelocity(body, nx * side, ny * side, support, world);
       registerContact(world, body.id, support.id);
     }
     return;
   }
-  if (signedNormalDistance < 0) {
+  if (sign_dist < 0) {
     nx *= -1;
     ny *= -1;
   }
-  const distance = Math.abs(signedNormalDistance);
+  const distance = Math.abs(sign_dist);
   const radius = supportRadius(body, nx, ny);
   const targetDistance = radius + Number(support.thickness ?? 6) / 2;
   if (distance >= targetDistance) return;
@@ -1455,13 +1529,14 @@ function resolveBoxSegment(body, support, world, dx, dy, lengthSquared, infinite
   }
   body.x += nx * penetration;
   body.y += ny * penetration;
-  const rawT = tangentDistance / length;
+  const rawT = tan_dist / length;
   bounceVelocity(body, nx, ny, support, world, {
     preserveGuideDirection: cornerEntry(body, support, world, rawT),
   });
   registerContact(world, body.id, support.id);
 }
 
+// 拐角处特意压住法向反射：题里写"平滑连接"的时候不能按墙弹
 function cornerEntry(body, support, world, rawT) {
   if (!Number.isFinite(rawT)) return 0;
   // 墙是障碍不是路：贴着墙边落到旁边地板上，不能把竖直速度掰成沿地板滑
@@ -1514,6 +1589,7 @@ function cornerEntry(body, support, world, rawT) {
   return targetAnchor === 'start' ? 1 : -1;
 }
 
+// 单体贴圆弧。全圆两边都能贴，开口轨道只认声明的那一面
 function resolveArc(body, support, world) {
   if (body.trackCooldown?.supportId === support.id) return;
   if (headingPortal(body, support)) return;
@@ -1530,6 +1606,7 @@ function resolveArc(body, support, world) {
   const separation = Math.abs(signedDistance);
   if (separation >= clearance) return;
 
+  // 盒子贴弧要先转向，转完半径会变，得按新姿态再判一次
   if (body.kind === 'box') {
     const previousAngle = Number(body.angle ?? 0);
     body.angle = canonicalBoxAngle(Math.atan2(radialY, radialX) + Math.PI / 2);
@@ -1558,22 +1635,23 @@ function resolveArc(body, support, world) {
   registerContact(world, body.id, support.id);
 }
 
-function nearJoint(body, support, world, tangentDistance, tangentRadius, length, tx, ty) {
+// 接缝附近先别解，让相邻那一面接手，否则物体卡在缝里左右抖
+function nearJoint(body, support, world, tan_dist, tan_radius, length, tx, ty) {
   const tangentSpeed = body.vx * tx + body.vy * ty;
   const crossSurfaceSpeed = Math.abs(body.vx * -ty + body.vy * tx);
   if (crossSurfaceSpeed < 0.75 * world.pixelsPerMeter) return false;
   const transitionMargin = Number(support.thickness ?? 6) / 2 + 2;
   if (
     tangentSpeed > EPSILON
-      && tangentDistance + tangentRadius >= length - transitionMargin
+      && tan_dist + tan_radius >= length - transitionMargin
       && hasConnectedEndpoint(world, support.id, 'end')
   ) return true;
   return tangentSpeed < -EPSILON
-    && tangentDistance - tangentRadius <= transitionMargin
+    && tan_dist - tan_radius <= transitionMargin
     && hasConnectedEndpoint(world, support.id, 'start');
 }
 
-function hasConnectedEndpoint(world, componentId, anchor) {
+function hasConnectedEndpoint(world, componentId, anchor) { // 查这个端点有没有跟别的支撑接上
   return world.connections.some((connection) => {
     if (connection?.kind !== 'coincident') return false;
     const leftMatches = connection.left?.componentId === componentId && connection.left?.anchor === anchor;
@@ -1584,6 +1662,7 @@ function hasConnectedEndpoint(world, componentId, anchor) {
   });
 }
 
+// 碰支撑面的统一出口：恢复系数、摩擦、传送带速度都在这里处理掉
 function bounceVelocity(body, nx, ny, material, world, { preserveSmoothTrackSpeed = false, preserveGuideDirection = 0 } = {}) {
   const normalSpeed = body.vx * nx + body.vy * ny;
   if (normalSpeed >= 0) return;
@@ -1639,6 +1718,8 @@ function bounceVelocity(body, nx, ny, material, world, { preserveSmoothTrackSpee
   }
 }
 
+// 恢复系数的优先级：粘合对直接 0 → 全局非弹性 0 → 材料里配的 → 全局弹性 1 →
+// 都没有就取两边小的那个。顺序别动，动了能量审计对不上。
 function bounceOf(world, left, right, foundationContact = false) {
   if (foundationContact && left?.compoundMemberIds?.length) {
     return Math.min(...world.bodies.filter(body => left.compoundMemberIds.includes(body.id))
@@ -1646,13 +1727,17 @@ function bounceOf(world, left, right, foundationContact = false) {
   }
   if (!foundationContact && collisionBinding(world, left, right)) return 0;
   if (world.collisionMode === 'inelastic') return 0;
+  // 弹性碰撞题（等质量交换速度）要 1，完全非弹性（子弹打木块）要 0，题面一般会写清楚
   const configured = contactMaterial(world, left, right);
   if (configured?.restitution != null) return clamp(Number(configured.restitution), 0, 1);
   if (!foundationContact && world.collisionMode === 'elastic') return 1;
   return Math.min(Number(left?.restitution ?? 1), Number(right?.restitution ?? 0));
 }
 
+// 出界回弹。只有 bounce 模式才调，open 模式直接飞出去
 function resolveBounds(body, world) {
+  // 以前这里还判过 body.kind==='wedge' 的情况，后来楔形不走这条路了
+  //console.log('bounds', body.id)
   const radiusX = body.physicsGeometry === 'point' ? 0 : body.kind === 'ball' ? body.radius : body.width / 2;
   const radiusY = body.physicsGeometry === 'point' ? 0 : body.kind === 'ball' ? body.radius : body.height / 2;
   //画布边界，这几个数是跟视口对过的，别乱改
@@ -1677,6 +1762,7 @@ function resolveBounds(body, world) {
   }
 }
 
+// 按形状分派。顺序有讲究：凹槽先判，不然楔形会被当成普通盒子
 function resolveBodyPair(a, b, world) {
   if (a.kind === 'groove' || a.kind === 'half-groove') return dealConcave(a, b, world);
   if (b.kind === 'groove' || b.kind === 'half-groove') return dealConcave(b, a, world);
@@ -1691,13 +1777,14 @@ function resolveBodyPair(a, b, world) {
   return hitCircles(a, b, world);
 }
 
+// 质点参与的对撞单独走一套：点在盒子里和点在盒子外是两种算法
 function resolvePointBodyPair(a, b, world) {
   const pointA = a.physicsGeometry === 'point';
   const pointB = b.physicsGeometry === 'point';
   if (pointA && pointB) {
     const dx = b.x - a.x, dy = b.y - a.y;
     const distance = Math.hypot(dx, dy);
-    const contactTolerance = 2;
+    const contactTolerance = 2; //两像素内算贴上，再大就看着像悬空
     if (distance >= contactTolerance) return;
     const relativeX = b.vx - a.vx, relativeY = b.vy - a.vy;
     const relativeLength = Math.hypot(relativeX, relativeY);
@@ -1762,13 +1849,13 @@ function resolvePointBodyPair(a, b, world) {
   registerContact(world, point.id, solid.id);
 }
 
+// 楔形当一条斜线段处理，斜面法向朝上
 function dealWedge(wedge, body, world) {
   if (['wedge', 'groove', 'half-groove'].includes(body.kind)) return;
   const halfWidth = Number(wedge.width) / 2;
   const halfHeight = Number(wedge.height) / 2;
   const angle = Number(wedge.angle ?? 0);
-  const cosine = Math.cos(angle);
-  const sine = Math.sin(angle);
+  const cosine = Math.cos(angle), sine = Math.sin(angle);
   const x1 = Number(wedge.x) - halfWidth * cosine + halfHeight * sine;
   const y1 = Number(wedge.y) - halfWidth * sine - halfHeight * cosine;
   const x2 = Number(wedge.x) + halfWidth * cosine - halfHeight * sine;
@@ -1788,26 +1875,27 @@ function dealWedge(wedge, body, world) {
 
   const relativeX = Number(body.x) - x1;
   const relativeY = Number(body.y) - y1;
-  const tangentDistance = relativeX * tx + relativeY * ty;
-  const tangentRadius = supportRadius(body, tx, ty);
+  const tan_dist = relativeX * tx + relativeY * ty;
+  const tan_radius = supportRadius(body, tx, ty);
   if (body.physicsGeometry === 'point'
-    ? tangentDistance < -EPSILON || tangentDistance > length + EPSILON
-    : tangentDistance + tangentRadius <= 0 || tangentDistance - tangentRadius >= length) return;
+    ? tan_dist < -EPSILON || tan_dist > length + EPSILON
+    : tan_dist + tan_radius <= 0 || tan_dist - tan_radius >= length) return;
 
-  const signedNormalDistance = relativeX * nx + relativeY * ny;
+  const sign_dist = relativeX * nx + relativeY * ny;
   const normalRadius = supportRadius(body, nx, ny);
   const pointTolerance = body.physicsGeometry === 'point' ? 2 : normalRadius;
-  if (signedNormalDistance < -pointTolerance || signedNormalDistance >= pointTolerance) return;
+  if (sign_dist < -pointTolerance || sign_dist >= pointTolerance) return;
 
   if (body.kind === 'box') body.angle = canonicalBoxAngle(Math.atan2(ty, tx));
   const alignedRadius = supportRadius(body, nx, ny);
-  const penetration = alignedRadius - signedNormalDistance;
+  const penetration = alignedRadius - sign_dist;
   if (penetration <= 0) return;
 
   applyPairImpulse(wedge, body, nx, ny, penetration, world);
   registerContact(world, wedge.id, body.id);
 }
 
+// 凹槽/半槽：转到容器局部坐标里算，半径和角度域都得对，容易错
 function dealConcave(container, body, world) {
   if (['wedge', 'groove', 'half-groove'].includes(body.kind)) return;
   const width = Math.max(1, Number(container.width));
@@ -1861,7 +1949,7 @@ function dealConcave(container, body, world) {
   registerContact(world, container.id, body.id);
 }
 
-function hitCircles(a, b, world) {
+function hitCircles(a, b, world) { // 圆圆最简单，法向就是圆心连线
   const dx = b.x-a.x, dy = b.y-a.y;
   const distance = Math.hypot(dx, dy) || 1;
   const minimum = a.radius + b.radius;
@@ -1870,6 +1958,7 @@ function hitCircles(a, b, world) {
   registerContact(world, a.id, b.id);
 }
 
+// 盒盒相撞，按穿透浅的那个轴分开
 function dealBoxBox(a, b, world) {
   const overlapX = a.width/2 + b.width/2 - Math.abs(b.x-a.x);
   const overlapY = a.height/2 + b.height/2 - Math.abs(b.y-a.y);
@@ -1883,6 +1972,7 @@ function dealBoxBox(a, b, world) {
   registerContact(world, a.id, b.id);
 }
 
+// 球盒：先夹到盒子上找最近点；完全重合时按深浅挑一个轴推出去
 function pushBallBox(ball, box, world) {
   const half_w = box.width/2, half_h = box.height/2;
   const px = clamp(ball.x, box.x-half_w, box.x+half_w);
@@ -1907,11 +1997,12 @@ function pushBallBox(ball, box, world) {
   registerContact(world, ball.id, box.id);
 }
 
-function registerContact(world, leftId, rightId) {
+function registerContact(world, leftId, rightId) { // 接触键统一排序，免得 a|b 和 b|a 被当成两次接触
   const key = String(leftId) < String(rightId) ? `${leftId}|${rightId}` : `${rightId}|${leftId}`;
   world.contactKeys.add(key);
 }
 
+// 冲量主体：先按逆质量推开，再算法向冲量，最后补切向摩擦冲量
 function applyPairImpulse(a, b, nx, ny, penetration, world) {
   const compoundA = world.compounds.find(item => item.memberIds.includes(a.id));
   const compoundB = world.compounds.find(item => item.memberIds.includes(b.id));
@@ -1937,13 +2028,14 @@ function applyPairImpulse(a, b, nx, ny, penetration, world) {
   shift(b, compoundB, nx * penetration * inverseB / inverseSum, ny * penetration * inverseB / inverseSum);
   const relativeX = b.vx - a.vx;
   const relativeY = b.vy - a.vy;
-  const relativeNormal = relativeX * nx + relativeY * ny;
-  if (relativeNormal >= 0) return;
+  const rel_n = relativeX * nx + relativeY * ny;
+  if (rel_n >= 0) return;
   world.impactKeys.add(contactPairKey(a.id, b.id));
   const binding = collisionBinding(world, a, b);
   const impactState = binding ? bindingImpactState(world, a, b) : null;
   const restitution = bounceOf(world, a, b);
-  const impulse = -(1 + restitution) * relativeNormal / inverseSum;
+  // 这就是课本上那个式子，别自己推，推出来的符号容易反
+  const impulse = -(1 + restitution) * rel_n / inverseSum;
   kick(a, compoundA, -impulse * nx * inverseA, -impulse * ny * inverseA);
   kick(b, compoundB, impulse * nx * inverseB, impulse * ny * inverseB);
   const tx = -ny;
@@ -1957,6 +2049,7 @@ function applyPairImpulse(a, b, nx, ny, penetration, world) {
     contactPairKey(a.id, b.id));
 }
 
+// 粘合前的动量和动能快照，后面审计要看这个
 function bindingImpactState(world, a, b) {
   const connected = world.compounds.filter(item => item.memberIds.includes(a.id) || item.memberIds.includes(b.id));
   const ids = new Set([a.id, b.id, ...connected.flatMap(item => item.memberIds)]);
@@ -1969,7 +2062,7 @@ function bindingImpactState(world, a, b) {
   }, { momentum: { x: 0, y: 0 }, kinetic: 0 });
 }
 
-function collisionBinding(world, a, b) {
+function collisionBinding(world, a, b) { // 找这一对背后有没有声明过的粘合
   const membersFor = id => world.compounds.find(item => item.memberIds.includes(id))?.memberIds ?? [id];
   const leftIds = membersFor(a.id), rightIds = membersFor(b.id);
   return world.collisionBindings?.find(binding => !binding.active
@@ -1977,10 +2070,11 @@ function collisionBinding(world, a, b) {
       || (leftIds.includes(binding.rightId) && rightIds.includes(binding.leftId))));
 }
 
-function sameCompound(world, leftId, rightId) {
+function sameCompound(world, leftId, rightId) { // 同一个复合体内部不解碰撞，不然自己跟自己打架
   return world.compounds.some(item => item.memberIds.includes(leftId) && item.memberIds.includes(rightId));
 }
 
+// 粘上：合成一个整体，质量和质心按质量加权，速度取共同速度
 function stickPair(binding, a, b, world, impactState = null, impactPair = null) {
   const connected = world.compounds.filter(item => item.memberIds.includes(a.id) || item.memberIds.includes(b.id));
   const memberIds = [...new Set([a.id, b.id, ...connected.flatMap(item => item.memberIds)])];
@@ -2016,6 +2110,7 @@ function stickPair(binding, a, b, world, impactState = null, impactPair = null) 
   putMembers(compound, new Map(world.bodies.map(item => [item.id, item])));
 }
 
+// 粘合正好发生在弧上的时候顺手接管轨道，不然会当场掉下去
 function carryArc(compound, formerTracks, world) {
   if (!formerTracks.length || formerTracks.some(state => !state?.supportId)) return;
   const supportId = formerTracks[0].supportId;
@@ -2051,6 +2146,7 @@ function carryArc(compound, formerTracks, world) {
   compound.vy = tangent.y * tangentSpeed;
 }
 
+// 把复合体的位姿写回每个成员，偏移要跟着一起转
 function putMembers(compound, bodies) {
   const cosine = Math.cos(compound.angle), sine = Math.sin(compound.angle);
   for (const id of compound.memberIds) {
@@ -2064,6 +2160,7 @@ function putMembers(compound, bodies) {
   }
 }
 
+// 反算：成员被外力推过之后，把复合体的质心拉回来对齐
 function syncBinds(world, bodies) {
   for (const compound of world.compounds) {
     if (compound.trackState) {
@@ -2079,6 +2176,8 @@ function syncBinds(world, bodies) {
   }
 }
 
+// 摩擦系数查找。优先级一路往下掉：
+// 复合体按质量加权 → 摩擦区 → 老场景兜底 → 材料表 → 容器内壁 → 单边配置 → 几何均值。
 function pairFriction(a, b, world) {
   if (a?.compoundMemberIds?.length) {
     return world.bodies.filter(body => a.compoundMemberIds.includes(body.id))
@@ -2110,7 +2209,7 @@ function pairFriction(a, b, world) {
   return 0;
 }
 
-function zoneFriction(support, body) {
+function zoneFriction(support, body) { // 摩擦区按沿支撑方向的位置判，斜面一样适用
   if (support?.role !== 'support' || !Array.isArray(support.frictionZones) || !support.frictionZones.length
     || body?.role !== 'body') return null;
   const dx = Number(support.x2) - Number(support.x1), dy = Number(support.y2) - Number(support.y1);
@@ -2121,6 +2220,7 @@ function zoneFriction(support, body) {
   return zone ? clamp(Number(zone.friction ?? 0), 0, 1.5) : null;
 }
 
+// 这层就是给上面留个口子，别的地方统一叫 contactFriction
 function contactFriction(world, left, right) {
   return pairFriction(left, right, world);
 }
@@ -2131,20 +2231,20 @@ export function muOn(world, body, support) {
   return body && support ? contactFriction(world, body, support) : 0;
 }
 
-function contactMaterial(world, left, right) {
+function contactMaterial(world, left, right) { // 材料表是对称的，键在存的时候就排过序了
   return world.contactMaterials?.get(contactPairKey(left?.id, right?.id)) ?? null;
 }
 
-function contactPairKey(leftId, rightId) {
+function contactPairKey(leftId, rightId) { // 两两配对的键，永远小的在前
   const left = String(leftId ?? '');
   const right = String(rightId ?? '');
   return left < right ? `${left}|${right}` : `${right}|${left}`;
 }
-
-function inverseMass(body) {
+function inverseMass(body) { // 固定物体当无穷大质量，逆质量给 0
   return body.fixed === true ? 0 : 1 / bodyMass(body);
 }
 
+// 盒子在某个方向上的支撑半径：把半宽半高投到法向上
 function supportRadius(body, nx, ny) {
   if (body.physicsGeometry === 'point') return 0;
   if (body.kind === 'ball') return Number(body.radius);
@@ -2157,6 +2257,7 @@ function supportRadius(body, nx, ny) {
     + Math.abs(proj_y) * Number(body.height) / 2;
 }
 
+// 能量和动量每步重算，题目里要对数的，慢一点也认了
 function calculateMetrics(world, anchors, bodies) {
   const pixelsPerMeter = world.pixelsPerMeter;
   let kinetic = 0;
@@ -2184,6 +2285,7 @@ function calculateMetrics(world, anchors, bodies) {
     spring += 0.5 * constraint.stiffness * stretchMeters * stretchMeters;
   }
   world.energy = kinetic + potential + spring;
+  // 复合弹簧的弹性势能单独加：解放之前按压缩量算，之后不再计
   if(world.hybridProcess){
     let stored=0;
     for(const c of world.hybridSprings){
@@ -2205,10 +2307,12 @@ function calculateMetrics(world, anchors, bodies) {
   world.momentum = { x: px, y: py };
 }
 
+// 给渲染和外部核对用的快照。纯拷贝，别在这里算东西
 export function snapshotOf(world) {
   //TODO: 字段顺序有测试盯着比对，加字段前想清楚
   const anchors = new Map(world.anchors.map((item) => [item.id, item]));
   const bodies = new Map(world.bodies.map((item) => [item.id, item]));
+  // 只输出外部要用的字段。contactKeys 那种内部集合不往外给，给了也没人看
   return {
     time: world.time,
     completed: world.completed === true,
@@ -2267,7 +2371,7 @@ export function snapshotOf(world) {
   };
 }
 
-function springEndSnap(endpoint, mode) {
+function springEndSnap(endpoint, mode) { // 接触端的 id 要一起带出去，渲染那边要标接触点
   return {
     x: Number(endpoint.x),
     y: Number(endpoint.y),
@@ -2280,19 +2384,19 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function normalizedAngle(angle) {
+function normalizedAngle(angle) { // 统一到 [0, 2π)
   const full = Math.PI * 2;
   return ((angle % full) + full) % full;
 }
 
-function canonicalBoxAngle(angle) {
+function canonicalBoxAngle(angle) { // 盒子角度折到 ±90°，转过去看着一样，物理上也一样
   let value = Number(angle)||0;
   while(value>Math.PI/2)value-=Math.PI;
   while(value<=-Math.PI/2)value+=Math.PI;
   return value;
 }
 
-function angleWithin(angle, start, end) {
+function angleWithin(angle, start, end) { // 区间可能跨零，分两种情况
   const normalizedStart = normalizedAngle(start);
   const normalizedEnd = normalizedAngle(end);
   if (normalizedStart <= normalizedEnd) return angle >= normalizedStart && angle <= normalizedEnd;
