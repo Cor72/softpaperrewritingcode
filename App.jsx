@@ -28,7 +28,7 @@ import { ConstructCore } from './components/ConstructCore.jsx'
 import { SceneCanvasThumbnail } from './components/SceneCanvasThumbnail.jsx'
 import { ConfirmationDialog, IconButton } from './components/ui.jsx'
 import { AlertTriangle, UserRound, BookOpen, Check, ChevronDown, ChevronUp, Download, FileImage, FolderOpen, Grid2X2, Hand, Moon, MousePointer2, MoreHorizontal, Pause, Plus, Play, Redo2, RotateCcw, Save, Sun, Undo2, Upload, X, Zap } from 'lucide-react'
-// 物理模型层，基本都是从 model.js 里扒出来的
+// 物理模型层,取材model.js
 import { DEFAULT_PIXELS_PER_METER, PRESETS, addComponentForTool, bodyAttachSnapPreview, beginParameterExperiment, buildSceneFromEvidence, componentsInSelectionRect, attachSnapPreview, contactMaterialBetween, createScene, convertToSandbox, springStoredEnergy, materializeScene, normalizeScene, paperAnnotations, presetScene, removeComponent, resizeComponent, supportSnapPreview, settleEditorScene, touchScene, translateComponent, translateComponents, updateComponent, updateContactMaterial, updateConstraintAttachment, updateConstraintAttachmentMode, updateRopeLength, wedgeSurfaceSegment } from './model.js'
 import { arcVisualGeometry, bodyVisualPose, cartWheelVisualGeometry, compoundVisualBodies, constraintVisibleAtTime, conveyorBeltMarkers, fixedAnchorVisualGeometry, grooveVisualGeometry, inclineVisualOutline, openBoxVisualGeometry, mountedSpringView, liveBodyDisplay, nearestContactAngle, pointGlyphOffsets, supportHatchSegments, supportVisualSurface, visibleSupportGeometry, polar, arcSweepRadians, normalizedDegrees } from './visualGeometry.js'
 import { springEnergyData } from './physics/springEnergyEvidence.js'
@@ -36,7 +36,7 @@ import { applySubquestionScenario, updateSubquestionDelta } from './physics/subq
 import { normalizeParameterDraft, parameterStepDisabled, stepParameterValue, snapParameterAngle, formatParameterValue, formatNumericValue } from './parameterInput.js'
 import { trackInclination, trackSlope, editTrackInclination, formatAngle } from './trackAnglePresentation.js'
 import { objectObservations, globalObservation } from './observationPresentation.js'
-// AI 出题/搭建这一坨
+//这一坨是AI出题/搭建
 import { listLocalBuilds } from './ai/constructionJobClient.js'
 import { canRecoverLocalBuild, recoverConstructionResult } from './ai/constructionRecovery.js'
 import { loadSourceImage, restoredImageMeta, saveSourceImage, sha256OfBlob } from './ai/sourceImageStore.js'
@@ -71,19 +71,21 @@ const DRAWING_PEN_TIP_Y = 9
 const IMPORT_SIZE_LIMIT=5 * 1024 * 1024
 const THEME_PREFERENCE_KEY = 'xingchi-vision-v3:theme'
 
-// 单位都是毫秒
+// 单位毫秒
 const DRAFT_SAVE_DELAY_MS=450
 const TOAST_DURATION_MS=2200
 const SAVE_FEEDBACK_MS=2400
 
-// 动画就调色板导轨
+// 调色板导轨
 import { gsap } from 'gsap'
 import { useGSAP } from '@gsap/react'
 
-// 有运动程序的场景要先转成沙盒态再改
+// const DEFAULT_THEME = readTheme()
+// const DEFAULT_THEME_COLOR_MODE = DEFAULT_THEME?'dark':'light'
+// 运动程序转沙盒态
 const needsSandbox = (target) => target.components.some(item => item.motionProgram)
 
-// 读文件用的,走 file.text()
+//读文件
 const readFile = file => new Promise((resolve,reject) => {
   const reader = new FileReader();
   reader.onload =()=>resolve(String(reader.result||''));
@@ -91,7 +93,7 @@ const readFile = file => new Promise((resolve,reject) => {
   reader.readAsDataURL(file);
 })
 
-// const textHash = s => s.length // 老的偷懒版，撞名撞怕了
+// const textHash=s=>s.length //偷懒版（）
 const textHash = (text)=> {
   const value = String(text||'');
   let hash =0;
@@ -103,32 +105,32 @@ const textHash = (text)=> {
 
 const agentSourceKey = (analysis) => analysis?.sourceImageProvenance?.submittedSha256 ?? ''
 
-// 主题偏好属于本机体验设置：记住上次选择，首次访问跟随系统的黑板/白板偏好。
+// 主题偏好
 function readTheme() {
   try {
     const saved = window.localStorage.getItem(THEME_PREFERENCE_KEY)
     if (saved === 'dark') return true
     if (saved === 'light') return false
   } catch {
-    // 本机存储不可用时回落到系统偏好
+    //本机存储不可用
   }
   try { return window.matchMedia?.('(prefers-color-scheme: dark)')?.matches === true } catch { return false }
 }
 
-//运行时拉属性面板
+//属性面板
 const RUN_BLOCKING_CODES = ['PROCESS_PARAMETERS_REQUIRED', 'PROCESS_COMPONENT_BINDING_REQUIRED', 'MOTION_INVALID']
 
-// 这几条提示到处用，提出来省得改两遍
-const TOAST_NEED_RESET = '先复位喵，看看初始条件'
-const TOAST_NEED_UNLOCK = '编辑元件记得解锁装置'
-const TOAST_STORAGE_FULL = '存储空间满了，记得备份画布'
+// 提示
+const TOAST_NEED_RESET = '看看初始条件和复位'
+const TOAST_NEED_UNLOCK = '编辑元件/解锁装置'
+const TOAST_STORAGE_FULL = '存储空间满了'
 
 export function App() {
   const accountState = useSyncExternalStore(accountStore.subscribe, accountStore.getSnapshot, accountStore.getSnapshot)
   const accountOpen = accountState.open
   const account = accountState.account
 
-  // 本机存储读失败时给一份空场景兜住，别让整个应用白屏
+  //空场景
   const [initialWorkspace] = useState(() => {
     try {
       return loadWorkspace(window.localStorage)
@@ -136,7 +138,7 @@ export function App() {
       return {
         scene: createScene([]),
         savedKey: '',
-        warning: '本机存储不可用，请及时导出备份。'
+        warning:'本机存储不可用，请及时导出备份。'
       }
     }
   })
@@ -222,8 +224,8 @@ export function App() {
     running, run, runScene, pause, reset, resetScene, step, playbackRate, changePlaybackRate, runtimeError
   } = usePhysicsRuntime(scene)
 
-  // 编辑器树不跟着 20Hz 的读数走：时钟、播放态和属性面板各自订阅，
-  // 组合体只在成员真的变了才重渲染。
+  // 编辑器树不是20Hz！！！记得把时钟、播放态和属性面板tmd分开！
+  // 只有成员真的变了才重渲染组合体
   const compounds = useRuntimeValue(runtimeSnapshot, selectRuntimeCompounds, sameCompounds)
   const started = useRuntimeValue(runtimeSnapshot, selectRuntimeStarted)
 
@@ -231,6 +233,7 @@ export function App() {
     () => compoundVisualBodies(scene.components, positions, compounds, scene.annotations),
     [scene, positions, compounds]
   )
+  //here
   const memberIdSet = useMemo(() => new Set(compositeBodies.flatMap(body => body.memberIds)), [compositeBodies])
   const listedObjects = useMemo(() => [
     ...scene.components.filter(item => !memberIdSet.has(item.id)),
@@ -247,7 +250,7 @@ export function App() {
       return
     }
     if (!runReadiness.ready) {
-      // 学校流程实验必须先在面板里补参数，教研 9 月定的规矩，别问
+      // ===学校流程实验
       if (scene.schoolProcess && RUN_BLOCKING_CODES.includes(runReadiness.code)) {
         setSelectedIds([])
         setEditingAssemblyId(null)
@@ -255,8 +258,16 @@ export function App() {
         setToast(runReadiness.summary)
         return
       }
-      // 老版 AI 装置用留存的证据在本地升一次级。手动改过的实验和外来导入的题目
-      // 都不能覆盖；带构建计划的场景卡在原图复核上，重建只会白跑一遍主线。
+      // const saved = window.localStorage.getItem('saved')
+      // if (saved) {
+      //   const savedScene = JSON.parse(saved)
+      //   if (savedScene.id === scene.id) {
+      //     commit(savedScene)
+      //     setFitRequest(value => value + 1)
+      //     runScene(savedScene)
+      //     return
+      //   }
+      // }
       const canRebuild = !scene.energyMotion
         && scene.source === 'ai-assist'
         && scene.problemAnalysis
@@ -333,7 +344,7 @@ export function App() {
     if (!aiDrawing?.scene) return
     pause()
     setAiDrawing(null)
-    setToast('装置画好喵，初始状态随便改')
+    setToast('装置画好了')
   }, [aiDrawing, pause])
 
   const commit = useCallback((next) => setTimeline(current => commitHistory(current, next)), [])
@@ -352,21 +363,21 @@ export function App() {
       setEditingAssemblyId(null)
       after()
     }
-    // 空画布直接换；有未保存改动的先问人，别把人刚搭的东西冲掉
+    //这部分是换画布的代码
     if (!dirty || !scene.components.length) {
-      apply()
-      return
+      apply();
+      return;
     }
     if (preserveCurrent) {
-      if (save()) apply()
-      else setToast('存不下了，先清清本机存储再开新的')
-      return
+      if (save()) apply();
+      else setToast('存储空间已满')
+      return;
     }
     setPendingReplacement({ apply })
   }
 
   const selectSubScenario = (variantId) => {
-    if (!scene.scenarioVariants || running || aiDrawing) return
+    if (!scene.scenarioVariants || running || aiDrawing) return;
     const next = rebindScenarioData(applySubquestionScenario(scene, variantId))
     resetScene(next)
     commit(next)
@@ -381,6 +392,13 @@ export function App() {
     commit(next)
     setToast('已修改当前小问的条件')
   }
+  // const changeSubquestionCondition = (variantId, deltaId, value) => {
+  //   if (!scene.scenarioVariants || running || aiDrawing) return
+  //   const next = rebindScenarioConditionEvidence(updateSubquestionScenarioDelta(scene, variantId, deltaId, value), { experiment: true })
+  //   resetScene(next)
+  //   commit(next)
+  //   setToast('已修改当前小问的条件')
+  // }
 
   const startNewScene = () => {
     const next = createScene([], { title: '新建场景', source: 'manual', creationMode: 'manual' })
@@ -388,12 +406,12 @@ export function App() {
       setSavedKey('')
       setInspectorOpen(false)
       setSandboxOpen(false)
-      setToast('已新建空白场景')
+      setToast('已新建空白场景');
     }
     replaceScene(next, after)
   }
 
-  // 草稿防抖落盘；写失败就把状态挂成 failed，别静默丢数据
+  //草稿防抖
   useEffect(() => {
     if (initialWorkspace.warning && scene === initialWorkspace.scene) {
       setDraftStatus('failed')
@@ -409,6 +427,8 @@ export function App() {
         setDraftStatus('failed')
         setStorageError(TOAST_STORAGE_FULL)
       }
+
+      // setStorageError('')
     }, DRAFT_SAVE_DELAY_MS)
     return () => window.clearTimeout(timer)
   }, [scene])
@@ -428,7 +448,7 @@ export function App() {
     return () => window.removeEventListener('beforeunload', protectDraft)
   }, [scene, dirty])
 
-  // TODO: 历史栈没设上限，玩久了会不会爆内存，回头压一下
+  //TODO: 历史栈没设上限，如果你看到了，对就是你，记得修一下
   const undo = () => setTimeline((current) => {
     if (!current.past.length) return current
     const previous = current.past[current.past.length - 1]
@@ -448,7 +468,7 @@ export function App() {
     }
   })
 
-  // 场景换了之后，把已经不存在的选中项和组合一起清掉
+  //换场景
   useEffect(() => {
     const availableIds = new Set(scene.components.map(item => item.id))
     setEditingAssemblyId((current) => {
@@ -478,12 +498,13 @@ export function App() {
     return () => window.clearTimeout(timer)
   }, [saveFeedback])
 
-  // 方向键挪元件，Shift 大步走。抽出来是因为 keydown 那个 effect 太长了
+  // 方向键tag {keydown的effect是不是太长了。。。
   const nudgeSelection = (key, shiftKey) => {
     const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }
     const arrow = arrows[key]
     if (!arrow || !selectedIds.length || running || snapshotRef.current.time > 0) return
     const [dx, dy] = arrow
+    // const selectedId = selectedIds[0]
     const step_size = shiftKey ? 10 : 1
     const delta = { x: dx * step_size, y: dy * step_size }
     if (editingAssembly) {
@@ -547,7 +568,7 @@ export function App() {
     const next = selectAssemblyItem(scene, selectedIds, id, { additive, editingAssemblyId })
     setSelectedIds(next.ids)
     setEditingAssemblyId(next.editingAssemblyId)
-    // 点空白只清选中，不该顺手把属性面板弹出来
+    //注意点空白不要弹出属性面板
     if (id && !aiOpen) setInspectorOpen(true)
   }
 
@@ -564,7 +585,7 @@ export function App() {
 
   const addTool = (tool) => {
     if (assemblyEditRequiresReset(scene, running, snapshotRef.current.time)) {
-      setToast('先复位喵，再加元件，装置组合不动你的')
+      setToast('复位加元件')
       return
     }
     let base = scene
@@ -654,12 +675,12 @@ export function App() {
       if (item.id === scene.id) {
         setSavedKey('')
         setSaveFeedback(false)
-        setToast('删掉喵，画布上的草稿还在')
+        setToast('删掉并保留画布上的草稿')
       } else {
         setToast(`已删除「${item.title || '未命名场景'}」`)
       }
     } catch {
-      setStorageError('删不掉，本机存储不可用了')
+      setStorageError('本机存储不可用')
     }
   }
 
@@ -677,8 +698,7 @@ export function App() {
     downloadJson(sceneForStorage(scene), `${title}.v3.json`)
   }
 
-  // 本地排障走显式下载，不做任何自动上报；带上源题解读，
-  // 免得只有渲染层的样本把传输丢包盖过去。
+  // 本地排障走显式，免得渲染层的样本丢包
   const exportBuildRecord = () => {
     downloadJson({
       kind: 'construction-diagnostic',
@@ -691,12 +711,12 @@ export function App() {
   const importScene = async (file) => {
     if (!file) return
     try {
-      if (file.size > IMPORT_SIZE_LIMIT) throw new Error('备份文件过大，请使用小于 5 MB 的文件')
+      if (file.size > IMPORT_SIZE_LIMIT) throw new Error('备份文件过大，请使用小于5MB的文件')
       const text = await file.text()
       const next = normalizeScene(prepareImportedScene(JSON.parse(text)))
       const after = () => {
         if (aiSceneViewportIdentity(next)) setFitRequest(value => value + 1)
-        // 斜面滑块是中考常客，单独留了个恢复入口
+        // 斜面滑块特殊处理
         if (next.motionModel?.family === 'fixed-incline-slide') {
           setToast('备份恢复好了，要继续生成的话原题得再传一次')
         } else {
@@ -710,16 +730,16 @@ export function App() {
     if (importRef.current) importRef.current.value = ''
   }
 
-  // 下面这些是 JSX 里 inline 写不下才抽出来的，逻辑没变
+  // 下面这些是JSX里inline写不下抽出来的逻辑
   const rebuildFromProblem = () => {
     const rebuilt = rebuildRetainedProblem(scene)
     if (!rebuilt) {
-      setToast('留下的题目信息不够，搭不回去了')
+      setToast('余留题目信息不足')
       return
     }
     const after = () => {
       setFitRequest(value => value + 1)
-      setToast('照着留下的题干和图重搭好了')
+      setToast('按留下的题干和图片重新搭好了')
     }
     replaceScene(rebuilt, after, { preserveCurrent: true })
   }
@@ -731,7 +751,7 @@ export function App() {
     commit(original)
     setFitRequest(value => value + 1)
     setSelectedIds([])
-    setSelectedIds([]) // 不置两次有时选中清不掉，别删
+    setSelectedIds([]) //不置两次有可能选中清不掉
   }
 
   const configureSchoolProcess = (values) => {
@@ -758,7 +778,7 @@ export function App() {
     commitEdit(dissolveAssembly(scene, selectedAssembly.id))
     setEditingAssemblyId(null)
     setSelectedId(selectedAssembly.slots.body ?? selectedId)
-    setToast('已拆分，元件和物理连接保持不变')
+    setToast('已按模块拆分，没有变动元件和物理的连接')
   }
 
   const updateSelectedComponent = (patch) => {
@@ -802,20 +822,20 @@ export function App() {
       } else {
         runScene(next)
       }
-      let message = '物理演示已生成'
-      if (phase === 'drawing') message = '装置理解完成，星驰视界正在绘制'
-      setToast(message)
+      let message = '已生成物理演示'
+      if (phase==='drawing') message='完成装置理解，正在绘制星驰视界';
+      setToast(message);
     }
     replaceScene(next, after, { preserveCurrent: true })
   }
 
-  // 组合体的按钮要跟着任意成员被选中的状态亮起，单独看一个 id 不够
+  //任意成员被选中亮起组合体的按钮
   const isObjectPressed = (item) => {
     if (!item.memberIds) return selectedIds.includes(item.id)
     return item.memberIds.some(id => selectedIds.includes(id))
   }
 
-  // 渲染前先把条件都算成变量，JSX 里只留插值，看的时侯不用来回跳
+  //JSX里面只留个插值
   const constructionProcess = sceneConstructionProcess(scene)
   const phaseScopeLabel = selectedPhaseScopeLabel(constructionProcess)
   const covered = aiOpen || Boolean(pendingReplacement) || accountOpen || libraryOpen
@@ -827,11 +847,11 @@ export function App() {
   let menuClass = 'scene-menu-content'
   if (moreMenu.expanded) menuClass += ' is-open'
 
-  // 保存态三合一：失败 > 有改动 > 已保存，顺便把图标和 title 一起算掉
+  //保存态
   const saveStates = {
-    error: ['is-error', '!', '保存失败', storageError],
-    dirty: ['is-dirty', '•', '未保存', '有更改尚未保存到本机'],
-    saved: ['is-saved', '✓', '已保存到本机', '已保存到当前浏览器'],
+    error: ['is-error','!','保存失败', storageError],
+    dirty: ['is-dirty','•', '未保存', '有更改尚未保存到本机'],
+    saved: ['is-saved','✓','已保存到本机', '已保存到当前浏览器'],
   }
   const save_key = saveFailed ? 'error' : dirty ? 'dirty' : 'saved'
   const [saveStateClass, saveStateIcon, saveStateText, saveStateTitle] = saveStates[save_key]
@@ -839,9 +859,9 @@ export function App() {
   const saveButtonText = saveFailed ? '重试' : '保存'
   const accountLabel = accountState.demo ? '体验账户' : account ? '账户' : '登录'
   const accountTarget = account ? 'membership' : 'login'
-  const accountTitle = account?.displayName || '登录与会员积分'
+  const accountTitle = account?.displayName|| '登录与会员积分'
   const accountPoints = account ? account.points.toLocaleString('zh-CN') : ''
-  const pointsBadge = account ? <small className="top-points">{accountPoints} 积分</small> : null
+  const pointsBadge = account?<small className="top-points">{accountPoints} 积分</small> : null
 
   const menuAccountPoints = account && (
     <button className="menu-account-points" onClick={() => accountStore.open('points')}>
@@ -849,17 +869,17 @@ export function App() {
     </button>
   )
 
-  const themeIcon = dark ? <Sun size={16} /> : <Moon size={16} />
-  const themeLabel = dark ? '切换白板' : '切换黑板'
+  const themeIcon = dark ? <Sun size={16}/> : <Moon size={16} />
+  const themeLabel = dark?'切换白板' : '切换黑板'
 
-  const constructionRecordItem = import.meta.env.DEV && scene.problemAnalysis
-    ? <button onClick={exportBuildRecord}><Download size={16} />导出构建记录</button>
-    : null
+  const constructionRecordItem=import.meta.env.DEV && scene.problemAnalysis
+    ?<button onClick={exportBuildRecord}><Download size={16} />导出构建记录</button>
+    :null
 
   let rebuildItem = null
   const canRebuildFromProblem = scene.problemAnalysis?.recognizedText
-    && scene.reviewRecord?.source !== 'untrusted-import'
-  if (canRebuildFromProblem) {
+    &&scene.reviewRecord?.source !=='untrusted-import'
+  if(canRebuildFromProblem) {
     rebuildItem = <button onClick={rebuildFromProblem}>根据原题重新搭建</button>
   }
 
@@ -881,9 +901,9 @@ export function App() {
     onboarding = (
       <div className="canvas-onboarding">
         <strong>从一个小球，或一道题开始</strong>
-        <p>上传题目生成演示，也可以用下方组件自由搭建。</p>
-        <button onClick={() => setAiOpen(true)}>上传题目 / 输入题干</button>
-        <button onClick={() => { setSandboxOpen(true); setPaletteMode('presets') }}>打开经典场景</button>
+        <p>上传题目生成演示，或者使用下方组件自由搭建。</p>
+        <button onClick={() =>setAiOpen(true)}>上传题目 / 输入题干</button>
+        <button onClick={() =>{setSandboxOpen(true); setPaletteMode('presets') }}>打开经典场景</button>
         <div className="onboarding-examples">
           <span>试一试</span>
           {examplePresets.map(([key, label]) => (
@@ -916,14 +936,16 @@ export function App() {
         disabled={running || started || Boolean(aiDrawing)}
         onRestore={restoreOriginalHandler}
         onConfigure={configureSchoolProcess} />
-    )
+    );
   }
+  // let listedObjects = listedComponents(scene)
+  // listedObjects=listedObjects.filter(item => item.name item.memberIds)
 
   let objectRows = null
   if (listedObjects.length) {
     objectRows = listedObjects.map((item, i) => (
       <button key={item.id} aria-pressed={isObjectPressed(item)} onClick={() => selectComponent(item.memberIds?.[0] ?? item.id)}>
-        <span>{item.name || '元件'}</span>
+        <span>{item.name||'元件'}</span>
         <small>{i + 1}</small>
       </button>
     ))
@@ -962,6 +984,9 @@ export function App() {
         <div className="brand-lockup" role="img" aria-label="星驰视界 AI 物理画布">
           <div className="brand-mark"><ConstructCore size={46} /></div>
           <div className="brand-wordmark">
+            {/* <svg className="brand-logo" viewBox="0 0 120 120" role="img" aria-label="星驰视界" focusable="false">
+              <use href="/xingchi-vision-logo.svg?v=pendulum-04#brand-logo" />
+            </svg> */}
             <div className="brand-title-line">
               <svg className="brand-lettering" viewBox="0 0 516 124" role="img" aria-label="星驰视界" focusable="false">
                 <use href="/xingchi-vision-wordmark.svg?v=pendulum-04#brand-wordmark" />
@@ -981,6 +1006,7 @@ export function App() {
             <IconButton label="撤销" title="撤销 Ctrl+Z / ⌘Z" icon={Undo2}
               disabled={!timeline.past.length} onClick={undo} />
             <IconButton label="重做" title="重做 Ctrl+Shift+Z / ⌘Shift+Z" icon={Redo2}
+            //  disabled={!timeline.future.length} onClick={redo} />``
               disabled={!timeline.future.length} onClick={redo} />
           </div>
           <div className="save-actions">
