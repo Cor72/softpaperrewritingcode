@@ -1034,6 +1034,7 @@ export function App() {
               {menuAccountPoints}
               <button onClick={() => setDark(value => !value)}>{themeIcon}{themeLabel}</button>
               <button onClick={exportScene}><Download size={16} />备份画布</button>
+
               {constructionRecordItem}
               {rebuildItem}
               <button onClick={() => importRef.current?.click()}><Upload size={16} />恢复备份</button>
@@ -1055,6 +1056,7 @@ export function App() {
             onSelect={selectComponent} onSelection={selectComponents}
             onBlankPointerDown={() => { setSandboxOpen(false); finishMemberEdit() }}
             onPause={pause} onEditBlocked={setToast} onCommit={commitEdit} />
+
           <div className="playback-toolbar" aria-label="演示控制">
             <PlaybackControls runtimeSnapshot={runtimeSnapshot} scene={scene} running={running}
               aiDrawing={aiDrawing} runReadiness={runReadiness} playbackRate={playbackRate}
@@ -1069,6 +1071,7 @@ export function App() {
           <ComponentPalette open={sandboxOpen} mode={paletteMode} onMode={setPaletteMode}
             onAdd={addTool} onAssembly={addAssembly} assemblyDisabled={running || started}
             onPreset={choosePreset}
+
             onGlobal={() => { setSelectedId(null); setInspectorOpen(true) }} />
 
           <BottomDock activeTool={canvasTool} onToolChange={setCanvasTool} sandboxOpen={sandboxOpen}
@@ -1098,6 +1101,7 @@ export function App() {
               onConstraintAttachmentMode={updateAttachmentMode}
               onClose={() => setPanelOpen(false)} />
           </div>
+
           <div className="context-pane" hidden={pane !== 'objects'}>
             <section className="context-object-list" aria-label="场景对象">
               <header><h2>场景对象</h2><span>{listedObjects.length} 个元件</span></header>
@@ -1156,7 +1160,7 @@ function BodyShape({ item, wheelRotation = 0, selected, annotationsVisible, show
     let vectors = null
     if (showVectors) vectors = <BodyVectors item={item} pixelsPerMeter={pixelsPerMeter} />
 
-    // 球没有边可拖，四个把手贴在 45° 的圆周上，走的还是角点缩放那套
+    // 球的角点缩放
     let ballHandles = null
     if (selected && !isCompound) {
       ballHandles = <BallHandles radius={item.radius + pad} onResize={onResize} />
@@ -1177,7 +1181,7 @@ function BodyShape({ item, wheelRotation = 0, selected, annotationsVisible, show
   if (Number.isFinite(Number(visualPose.angle))) poseAngle = Number(visualPose.angle)
   const angleDegrees = poseAngle * 180 / Math.PI
 
-  // 接触面朝向的物体，速度和力的箭头要跟世界坐标对齐，不能跟着物体转
+  // 接触面朝向的物体
   let counter_rot = 0
   if (Number.isFinite(Number(item.contactAngle))) {
     counter_rot = -Number(item.contactAngle) * 180 / Math.PI
@@ -1186,8 +1190,8 @@ function BodyShape({ item, wheelRotation = 0, selected, annotationsVisible, show
   if (item.kind === 'groove' || item.kind === 'half-groove') {
     const grooveGeometry = grooveVisualGeometry(item)
     const bounds = grooveGeometry.visualBounds
-    const half_w = bounds.width / 2
-    const half_h = bounds.height / 2
+    const half_w = bounds.width / 2;
+    const half_h = bounds.height / 2;
     const connectorPath = grooveGeometry.connectors
       .map(({ start, end }) => `M ${start.x} ${start.y} L ${end.x} ${end.y}`)
       .join(' ')
@@ -1327,7 +1331,7 @@ function BodyShape({ item, wheelRotation = 0, selected, annotationsVisible, show
   )
 }
 
-// 摩擦区是支撑面的一部分：沿支撑方向贴一条带子，所以斜面也能跟着走
+// 摩擦
 export function FrictionZones({ item }) {
   const zones = Array.isArray(item.frictionZones) ? item.frictionZones : []
 
@@ -1448,15 +1452,15 @@ function BodyVectors({ item, pixelsPerMeter = DEFAULT_PIXELS_PER_METER }) {
 }
 
 function VectorArrow({ angle, length, label, kind }) {
-  const radians = Number(angle ?? 0) * Math.PI / 180
-  const x = Math.cos(radians) * length
-  const y = -Math.sin(radians) * length
-  const arrow= 8
-  const wing = 4.5
-  const ux = x / length
-  const uy = y / length
-  const px = -uy
-  const py = ux
+  const radians = Number(angle ?? 0)*Math.PI/180;
+  const x = Math.cos(radians) *length;
+  const y = -Math.sin(radians) *length;
+  const arrow= 8;
+  const wing = 4.5;
+  const ux = x / length;
+  const uy = y / length;
+  const px = -uy;
+  const py = ux;
   const points = `${x},${y} ${x - ux * arrow + px * wing},${y - uy * arrow + py * wing} ${x - ux * arrow - px * wing},${y - uy * arrow - py * wing}`
   return (
     <g className={`vector-arrow ${kind}`}>
@@ -1534,7 +1538,7 @@ function SupportShape({ item, visualItem = item, simulationTime = 0, selected, a
     const ty = dy / length
     let upX = -ty
     let upY = tx
-    // 皮带法线统一翻到朝上，不然后面算上下边缘会左右颠倒
+    //法线
     if (upY > 0) {
       upX *= -1
       upY *= -1
@@ -1616,7 +1620,7 @@ function SupportShape({ item, visualItem = item, simulationTime = 0, selected, a
 
   const surface = supportVisualSurface(visualItem)
 
-  // 无限长的地面和无限碰撞范围要给斜线排一个世界锚点，不然缩放会跟着飘
+  // 无限长的地面和无限碰撞范围d处理(锚点)
   let infiniteHatchAnchor = null
   const infiniteExtent = item.collisionExtent === 'infinite'
     || (item.semanticType === 'ground' && item.collisionExtent !== 'finite')
@@ -1697,7 +1701,7 @@ function SupportAngleGuide({ item }) {
   const dy = second.y - first.y
   const length = Math.hypot(dx, dy) || 1
   const screenAngle = Math.atan2(dy, Math.max(0.0001, dx))
-  const radius = Math.max(30, Math.min(58, length * 0.22)) // 0.22 是试出来的，别改
+  const radius = Math.max(30, Math.min(58, length * 0.22)) //0.22是经验数值，弧线长度与角度的比，类似于残差之类的东西
   const arcStart = { x: first.x + radius, y: first.y }
   const arcEnd = { x: first.x + Math.cos(screenAngle) * radius, y: first.y + Math.sin(screenAngle) * radius }
   const labelAngle = screenAngle / 2
@@ -1764,7 +1768,7 @@ function ArcAngleGuide({ item, start, end, annotation = {} }) {
   )
 }
 
-// 主题写不进去也无所谓，不是关键数据，别报错吵到人
+// 主题
 function saveTheme(dark) {
   const themeName = dark ? 'dark' : 'light'
   const themeColor = dark ? '#1c1c1e' : '#fbfcf8'
