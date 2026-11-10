@@ -11,7 +11,6 @@ import './anyBuilder.css'
 const ROOT_ID = 'root'
 const STRICT_FLAG_KEY = 'react_strict_mode'
 
-// 严格模式开关藏在 localStorage 里，debug 的时候手动开
 const readStrictFlag = () => {
   try {
     const saved = localStorage.getItem(STRICT_FLAG_KEY)

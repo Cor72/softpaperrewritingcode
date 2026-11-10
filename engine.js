@@ -16,56 +16,70 @@ import {constraintChangeFamilies,stepConstraintChange} from './constraintChangeE
 import {springShuttleFamily,stepSpringShuttle} from './springShuttle.js'
 import {inclinePlankPassageFamily,stepInclinePlank} from './inclinePlankPassage.js'
 import {observePathCrossings} from './pathObservationEvents.js'
-// 物理引擎。渲染帧调tickWorld,剩下的都是小工具。
-// 这里不用DOM，画布去看BoardCanvas
+// 物理引擎，tickWorld是渲染帧,其他函数是小工具
+//不要动这里的DOM，别问为什么，要动画布去BoardCanvas
 const PIXELS_PER_METER = 52
 const EPSILON = 1e-7;
-const MAX_INTERNAL_SUBSTEPS =32
-const G_EPS =1e-9;//备用，之前防NaN用的，后来发现用不上
+const MAX_INTERNAL_SUBSTEPS =32;
+const G_EPS =1e-9;//之前防NaN用的，不过现在用不上了
 
-//有的场景懒得写质量，兜个底
+/**
+ * 获取物体的质量
+ * @param {object} body 物体
+ * @returns {number} 物体质量
+ */
 const bodyMass = body => Number.isFinite(Number(body?.mass)) && Number(body.mass) > 0
   ? Number(body.mass) : 0.05;
 
-// 建世界的入口。校验 → 拷一份支撑/物体 → 摊开 world → 预连接一次。
-// 场景对象本身不动，全靠 {...item} 拷，编辑器那边还在同时改它。
+// 世界入口
+// {...item}拷贝
 export function makeWorld(scene) {
-  if (!verifyNativeExperiment(scene).valid) throw new Error('原生实验跟场景对不上，先检查题设')
-  checkMotionPrograms(scene)
+  if (!verifyNativeExperiment(scene).valid) throw new Error('原生实验跟场景错位');
+  checkMotionPrograms(scene);
   if (!checkCarrierScene(scene).valid) throw new Error('储能运动和当前场景对不上')
   if (!checkBounceScene(scene)) throw new Error('反弹运动和当前场景对不上')
-  // 粘合对先一律置成没激活，真粘上是碰撞里判的
+  // 粘合状态设置成没激活
   const collisionBindings = fixBindings(scene.collisionBindings, scene.components)
-    .map(binding => ({ ...binding, active:false, offset:null }))
+    .map(binding => ({
+       ...binding, active:false, offset:null
+      }))
   const pixelsPerMeter = Math.max(24, Math.min(260, Number(scene.pixelsPerMeter ?? PIXELS_PER_METER)))
-  // 隐藏的支撑面也留着，图没了碰撞还得在
+  // 隐藏的支撑面,也就是图
   const supports = scene.components
     .filter(item => item.role==='support' && item.collisionEnabled!==false)
-    .map(item => ({ ...item }))
+    .map(item => ({
+      ...item }))
   const bodies = scene.components
-    .filter(item => item.role==='body' && !(item.sceneRole==='background' && item.collisionEnabled===false))
+    .filter(item => item.role==='body'
+      && !(item.sceneRole==='background'
+      && item.collisionEnabled===false))
     .map(item => ({
       ...item,
       asleep:false,
-      trackState:null, trackCooldown:null, lastTrackExit:null,
+      trackState:null,
+      trackCooldown:null, lastTrackExit:null,
     }))
   const prescribedDurations = bodies
-    .map(body => isPrescribedMotion(body.motionProgram) ? Number(body.motionProgram.duration) : null)
-    .filter(duration => Number.isFinite(duration) && duration >= 0)
-  // 题干写"足够长"的传送带就属于这种：演示走完就算结束，后面的不建模
-  const playbackDuration = Number(scene.constructionPlan?.playbackDuration)
-  if (Number.isFinite(playbackDuration) && playbackDuration > 0) prescribedDurations.push(playbackDuration)
-  // world 就是这一帧要用的全部状态。字段确实多了点，想过按子系统拆开，
-  // 但那样每帧来回拼更慢，先这么摊着。
+    .map(body => isPrescribedMotion(body.motionProgram) ? Number(body.motionProgram.duration): null)
+    .filter(duration =>Number.isFinite(duration) &&duration >= 0)
+  //演示走完结束
+  const playbackDuration =Number(scene.constructionPlan?.playbackDuration)
+  if (Number.isFinite(playbackDuration)&&playbackDuration >0){
+    prescribedDurations.push(playbackDuration);
+  }
+  // world是这一帧要用的全部状态
+  // TODO:字段确实多了点，后面看要不要按子系统拆开
+  const trackRule =schoolProcessStateAt(scene.railProcess, scene.components);
   const world = {
-    nativeExperiment: scene.nativeExperiment ?? null,
-    railProcess: scene.railProcess ?? null,
-    time: 0,
+    nativeExperiment:scene.nativeExperiment?? null,
+    railProcess: scene.railProcess?? null,
+    time:0,
     energyMotion: scene.energyMotion ?? null,
     presentationSprings: scene.components.filter(c=>c.kind==='spring' && c.energyRelease),
     hybridProcess: scene.hybridProcess ?? null,
     hybridSprings: scene.components.filter(c=>c.kind==='spring'&&c.hybridSpring),
     gravity: scene.gravityEnabled===false ? 0 : Number(scene.gravity ?? 9.81)*pixelsPerMeter,
+    //像素每米
     pixelsPerMeter,
     airDrag: Number(scene.airDrag ?? 0),
     collisionMode: scene.collisionMode ?? 'general',
@@ -75,13 +89,16 @@ export function makeWorld(scene) {
       contactPairKey(item.leftId, item.rightId), { ...item },
     ])),
     collisionBindings,
-    compounds: [],
-    adhesionEvents: [],
+    compounds:[],
+    adhesionEvents:[],
     motionEvents: [],
     rehearsalStages: isRehearsalStageLaw(scene.rehearsalMotion?.law)
       ? scene.rehearsalMotion.actors.flatMap(actor => actor.stages.map(stage => ({
-        id: `${actor.componentId}:${stage.id}`, bodyId: actor.componentId, stageId: stage.id,
-        kind: `stage-${stage.endCondition}`, time: stage.end }))) : [],
+        id: `${actor.componentId}:${stage.id}`,
+        bodyId: actor.componentId,
+        stageId: stage.id,
+        kind: `stage-${stage.endCondition}`,
+        time: stage.end }))) : [],
     bodies,
     prescribedDuration: prescribedDurations.length ? Math.max(...prescribedDurations) : null,
     completed: false,
@@ -92,8 +109,8 @@ export function makeWorld(scene) {
     anchors: scene.components.filter(item=>item.role==='anchor').map(item => ({ ...item })),
     constraints: scene.components
       .filter(item => item.role==='constraint' && item.physicsEnabled!==false)
-      .map(item => ({ ...item })),
-    contacts: 0,
+      .map(item =>({ ...item })),
+    contacts:0,
     contactKeys: new Set(),
     impactKeys: new Set(),
     energy: 0,
@@ -101,13 +118,16 @@ export function makeWorld(scene) {
     potentialReferenceY: Number(scene.potentialReferenceY ?? 824),
   };
   const bodiesById = new Map(world.bodies.map(body => [body.id, body]));
-  // 一上来就穿在导轨上的按初始约束算，不用再掉进那个带速度门的入口
+  //速度门初始约束
   for (const body of world.bodies) {
     const support=world.supports.find(s=>s.id===body.supportId);
     const constraint=trackRule(support);
-    if(body.requiredTrackConstraint!=='bilateral'||constraint?.mode!=='bilateral-slot')continue;
+    if(body.requiredTrackConstraint!=='bilateral'||constraint?.mode!=='bilateral-slot')
+      continue;
     const angle=Math.atan2(body.y-support.cy,body.x-support.cx);
-    const radius=guidedOrbitRadius(body,support,angle),distance=Math.hypot(body.x-support.cx,body.y-support.cy);
+    const radius=guidedOrbitRadius(body,support,angle);
+    const distance=Math.hypot(body.x-support.cx,body.y-support.cy);
+    //math
     if(Math.abs(distance-radius)>1e-5)continue;
     const tangent=circleTangent(angle),speed=body.vx*tangent.x+body.vy*tangent.y;
     if(Math.abs(body.vx*Math.cos(angle)+body.vy*Math.sin(angle))>1e-5)continue;
@@ -120,13 +140,17 @@ export function makeWorld(scene) {
   return world
 }
 
-// 外部只调这个。原生实验有自己的步进器，走完就算完；
-// 其余的按子步切开反复调 tickOnce，最后把接触键合并回去。
+// 外部原生实验步进器
+//步数切(什么刀名)
 export function tickWorld(world, dt = 1 / 120) {
   if(world.completed)return world;
 
-  //本来想把底下这坨calculateMetrics抽出去的，抽了一半先这样
-  const sync=()=>calculateMetrics(world,new Map(world.anchors.map(c=>[c.id,c])),new Map(world.bodies.map(c=>[c.id,c])));
+  //本来想把底下这坨calculateMetrics抽出去的,但是不要高估自己的能力
+  const sync=()=>calculateMetrics(
+    world,
+    new Map(world.anchors.map(c=>[c.id,c])),
+    new Map(world.bodies.map(c=>[c.id,c]))
+  );
   if(world.nativeExperiment?.family===inclinePlankPassageFamily){
     if(!Number.isFinite(dt)||dt<=0)return world;
     stepInclinePlank(world,dt);
@@ -146,13 +170,13 @@ export function tickWorld(world, dt = 1 / 120) {
     sync();
     return world;
   }
-  // 一次切多少内部步，快的场景能切到十几步
+  //循环
   const substeps = subSteps(world, dt);
   if (substeps === 1) return tickOnce(world, dt);
   const contactKeys = new Set();
   const impactKeys = new Set();
   const substep = dt / substeps;
-  for (let index = 0; index < substeps; index += 1) {
+  for (let index = 0; index < substeps; index +=1) {
    if(world.completed)break;
    tickOnce(world, substep);
    for (const key of world.contactKeys) contactKeys.add(key);
@@ -164,8 +188,7 @@ export function tickWorld(world, dt = 1 / 120) {
   return world;
 }
 
-// 一个内部步。顺序动不得：外力 → 积分 → 同步粘合 → 扫掠 → 解接触 → 撤力 → 判完成。
-// 换过顺序，扫掠放到解接触后面会漏碰撞。
+//外力/积分/粘合/扫/解/撤力/判定
 function tickOnce(world, dt) {
   world.contacts = 0;
   world.contactKeys.clear();
@@ -173,7 +196,7 @@ function tickOnce(world, dt) {
   world.stepDt = dt;
   const anchors = new Map(world.anchors.map((item) => [item.id, item]));
   const bodies = new Map(world.bodies.map((item) => [item.id, item]));
-  // 弹簧加速度每步只算一次，rideTrack 那边直接复用，省一轮遍历
+  // 弹簧加速度[]
   const springAccelerations = new Map(world.bodies.map((body) => [
     body.id,
     springAcceleration(body, world.constraints, anchors, bodies),
@@ -183,7 +206,7 @@ function tickOnce(world, dt) {
     ? world.time + dt
     : Math.min(world.prescribedDuration, world.time + dt);
 
-  // 已经挂上圆弧的复合体先整体推走，别一个成员一个成员挪
+  // da圆弧复合体
   for (const compound of world.compounds) {
     if (compound.trackState) comboArc(compound, world, dt, bodies);
   }
@@ -191,8 +214,8 @@ function tickOnce(world, dt) {
   for (const body of world.bodies) {
     if (world.compounds.some(compound => compound.trackState && compound.memberIds.includes(body.id))) continue
     if (body.fixed === true) {
-      body.previousX = body.x
-      body.previousY = body.y
+      body.previousX =body.x
+      body.previousY =body.y
       body.vx = 0
       body.vy = 0
       continue
@@ -204,22 +227,22 @@ function tickOnce(world, dt) {
     }
     updateTrackCooldown(body, dt)
     body.previousX = body.x
-    body.previousY = body.y
-    body.previousVx = body.vx
-    body.previousVy = body.vy
-    const springForce = springAccelerations.get(body.id) ?? { x: 0, y: 0 }
+    body.previousY =body.y
+    body.previousVx =body.vx
+    body.previousVy =body.vy
+    const springForce= springAccelerations.get(body.id) ?? { x: 0, y: 0 }
     const externalForce = forceAcceleration(body, world.pixelsPerMeter)
     const accelerationX = springForce.x + externalForce.x
     const accelerationY = world.gravity + springForce.y + externalForce.y
-    body.vx += accelerationX * dt
-    body.vy += accelerationY * dt
+    body.vx += accelerationX* dt
+    body.vy += accelerationY* dt
     const drag = dragMultiplier(world.airDrag, dt)
-    body.vx *= drag
-    body.vy *= drag
+    body.vx*= drag
+    body.vy*= drag
     //常加速度特判：位置要用上一时刻的速度推，不然恒力题的位移会差半步
     const constantAccelerationStep = world.airDrag === 0
-      && Math.abs(springForce.x) < EPSILON
-      && Math.abs(springForce.y) < EPSILON
+      && Math.abs(springForce.x)< EPSILON
+      && Math.abs(springForce.y)< EPSILON
       && !body.supportId
       && !body.supportedBy
       && !body.attachedTo
@@ -234,10 +257,10 @@ function tickOnce(world, dt) {
     }
   }
 
-  // 原来这里是一长串内联，抽成三个函数了，看着还是有点挤
+  //原来这里是一长串内联,抽成三个函数了,挤一下算了
   syncHyb(world,targetTime,bodies);
   syncBinds(world, bodies);
-  sweptStick(world, dt, bodies);
+  sweptStick(world,dt, bodies);
   syncBinds(world, bodies);
   for (const compound of world.compounds) {
     if (!compound.trackState && !compound.memberIds.every(id=>isPrescribedMotion(bodies.get(id)?.motionProgram))) tryCaptureCompoundArc(compound, world, bodies);
@@ -245,7 +268,7 @@ function tickOnce(world, dt) {
 
   contactRounds(world, bodies, anchors);
 
-  // "到达B点时撤去力F"、"作用t秒后撤去"这类：走过那段路或者到了那个时刻就停力
+  //判定走过了吗
   for (const body of world.bodies) {
     const stop = body.forceStop;
     if (!stop || !(Number(body.forceMagnitude) > 0)) continue;
