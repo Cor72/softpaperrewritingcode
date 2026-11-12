@@ -1412,7 +1412,7 @@ function comboShape(compound, world, bodies) {
     minX = Math.min(minX, localX - half_w); maxX = Math.max(maxX, localX + half_w);
     minY = Math.min(minY, localY - half_h); maxY = Math.max(maxY, localY + half_h);
   }
-  // 接触外形中心和质心把轻的放在上面
+  // 外形中心和质心比较时，要把轻的放在上面
   const localCenterX = point ? 0 : (minX + maxX) / 2;
   const localCenterY = point ? 0 : (minY + maxY) / 2;
   const cosine = Math.cos(compound.angle), sine = Math.sin(compound.angle);
@@ -1430,7 +1430,7 @@ function comboShape(compound, world, bodies) {
     previousVy: weightedPrevious('previousVy', 'vy') };
 }
 
-// 拿包围盒去解支撑面，解完把位移和速度同步回复合体
+// 拿包围盒去解支撑面
 function resolveCompoundSegment(compound, support, world, bodies) {
   const contactBody = comboShape(compound, world, bodies);
   if (!contactBody) return;
@@ -1445,7 +1445,7 @@ function resolveCompoundSegment(compound, support, world, bodies) {
   for (const memberId of compound.memberIds) registerContact(world, memberId, support.id);
 }
 
-// 线段支撑的主入口：先把两端裁掉，再按物体类型分派
+// 线段支撑的主入口
 function resolveSegment(body, support, world) {
   const dx = support.x2 - support.x1;
   const dy = support.y2 - support.y1;
@@ -1454,27 +1454,30 @@ function resolveSegment(body, support, world) {
   const length = Math.sqrt(lengthSquared);
   const tx = dx / length;
   const ty = dy / length;
+  // const support_radius=support.kind==='ball' ? Number(support.radius)
+
   const inf_extent = support.collisionExtent === 'infinite'
     || (support.semanticType === 'ground' && support.collisionExtent !== 'finite');
   const tan_dist = (body.x - support.x1) * tx + (body.y - support.y1) * ty;
-  // 往凹槽里画墙时墙一开始是插在地板下面的：视觉/审计端点保留接缝，
+  // 往凹槽里画墙时墙一开始是插在地板下面的，所以要减去半径
   // 碰撞不保留
   const insetStart = inf_extent ? 0 : Math.max(0, Number(support.collisionInsetStart ?? 0));
   const insetEnd = inf_extent ? 0 : Math.max(0, Number(support.collisionInsetEnd ?? 0));
-  // 示意质点要等参考点进到线段里才算碰到，
-  // 它画出来的矩形/圆不能先把下一个面激活
+  // 质点要等参考点进到线段里才算碰撞
+
   if (body.physicsGeometry === 'point' && !inf_extent
     && (tan_dist < insetStart - EPSILON || tan_dist > length - insetEnd + EPSILON
       || (tan_dist <= insetStart + EPSILON && hasConnectedEndpoint(world, support.id, 'start')))) return;
   const tan_radius = body.physicsGeometry === 'point' ? 0 : body.kind === 'ball'
     ? Number(body.radius)
     : supportRadius(body, tx, ty);
+  //它画出来的矩形/圆不能先把下一个面激活
   if (!inf_extent && nearJoint(body, support, world, tan_dist, tan_radius, length, tx, ty)) return;
   if (['box', 'wedge', 'groove', 'half-groove'].includes(body.kind)) {
     resolveBoxSegment(body, support, world, dx, dy, lengthSquared, inf_extent);
     return;
   }
-  // 圆和点：找最近点，法向就是连线方向，重合了才取垂线
+  //圆和点：找最近点
   const rawT = ((body.x - support.x1) * dx + (body.y - support.y1) * dy) / lengthSquared;
   const t = inf_extent ? rawT : clamp(rawT, insetStart / length, (length - insetEnd) / length);
   const px = support.x1 + dx * t;
@@ -1504,8 +1507,7 @@ function resolveSegment(body, support, world) {
   });
   registerContact(world, body.id, support.id);
 }
-
-// 盒子撞线段：先把盒子摆正到贴着面，角度变了支撑半径也变，得重算一遍
+// 盒子撞线段
 function resolveBoxSegment(body, support, world, dx, dy, lengthSquared, inf_extent = false) {
   const length = Math.sqrt(lengthSquared);
   const tx = dx / length;
@@ -1528,7 +1530,7 @@ function resolveBoxSegment(body, support, world, dx, dy, lengthSquared, inf_exte
     : tan_dist + tan_radius <= insetStart || tan_dist - tan_radius >= length - insetEnd)) return;
 
   const sign_dist = relativeX * nx + relativeY * ny;
-  // 零厚度的线对质点得判"这一帧有没有穿过去"，只判穿透的话快的一步就漏了
+  // 零厚度的线对质点得特判，这tm第几回了
   if (body.physicsGeometry === 'point' && Math.abs(Number(support.thickness ?? 6)) <= EPSILON) {
     const prev_nd = (Number(body.previousX ?? body.x) - support.x1) * nx
       + (Number(body.previousY ?? body.y) - support.y1) * ny;
@@ -1572,10 +1574,10 @@ function resolveBoxSegment(body, support, world, dx, dy, lengthSquared, inf_exte
   registerContact(world, body.id, support.id);
 }
 
-// 拐角处特意压住法向反射：题里写"平滑连接"的时候不能按墙弹
+// 拐角处要压住法向反射
 function cornerEntry(body, support, world, rawT) {
   if (!Number.isFinite(rawT)) return 0;
-  // 墙是障碍不是路：贴着墙边落到旁边地板上，不能把竖直速度掰成沿地板滑
+  // 墙是障碍
   if (support.kind === 'wall') return 0;
   const targetDx = Number(support.x2) - Number(support.x1);
   const targetDy = Number(support.y2) - Number(support.y1);
@@ -1589,7 +1591,7 @@ function cornerEntry(body, support, world, rawT) {
       || (item.right?.componentId === support.id && item.right?.anchor === targetAnchor)
   ));
   if (!connection) return 0;
-  // 题里写平滑连接/无碰撞的拐角：拐过去不损失速度，下一面再糙也等滑过去再算摩擦
+  //平滑连接/无碰撞的拐角
   const smoothCorner = connection.smooth === true;
   if (!smoothCorner && contactFriction(world, body, support) > EPSILON) return 0;
   const targetIsLeft = connection.left?.componentId === support.id && connection.left?.anchor === targetAnchor;
@@ -1614,6 +1616,7 @@ function cornerEntry(body, support, world, rawT) {
   const previousRadius = supportRadius(body, -previousTy, previousTx)
     + Math.max(0, Number(previousSupport.thickness ?? 0)) / 2 + 4;
   const endpointMargin = supportRadius(body, previousTx, previousTy) + 6;
+
   const nearPreviousEndpoint = otherEnd?.anchor === 'start'
     ? previousAlong >= -endpointMargin && previousAlong <= endpointMargin
     : previousAlong >= previousLength - endpointMargin && previousAlong <= previousLength + endpointMargin;
@@ -1625,7 +1628,7 @@ function cornerEntry(body, support, world, rawT) {
   return targetAnchor === 'start' ? 1 : -1;
 }
 
-// 单体贴圆弧。全圆两边都能贴，开口轨道只认声明的那一面
+//单体贴圆弧
 function resolveArc(body, support, world) {
   if (body.trackCooldown?.supportId === support.id) return;
   if (headingPortal(body, support)) return;
@@ -1642,7 +1645,7 @@ function resolveArc(body, support, world) {
   const separation = Math.abs(signedDistance);
   if (separation >= clearance) return;
 
-  // 盒子贴弧要先转向，转完半径会变，得按新姿态再判一次
+  //盒子贴弧要先转向
   if (body.kind === 'box') {
     const previousAngle = Number(body.angle ?? 0);
     body.angle = canonicalBoxAngle(Math.atan2(radialY, radialX) + Math.PI / 2);
@@ -1654,8 +1657,8 @@ function resolveArc(body, support, world) {
     }
   }
 
-  // 声明了单侧轨道的就有真实的骑乘面，积分在中线两侧那点漂移
-  // 不能偷偷换掉法向。整圆哪边来都接；开口轨道则死守声明的那面
+  //声明单侧轨道就有了真实的骑乘面
+  //不能换掉法向
   const side = support.fullCircle !== true && support.contactSide === 'inner' ? -1
     : support.fullCircle !== true && support.contactSide === 'outer' ? 1
       : signedDistance >= 0 ? 1 : -1;
@@ -1671,7 +1674,7 @@ function resolveArc(body, support, world) {
   registerContact(world, body.id, support.id);
 }
 
-// 接缝附近先别解，让相邻那一面接手，否则物体卡在缝里左右抖
+// 接缝让相邻的一面接手
 function nearJoint(body, support, world, tan_dist, tan_radius, length, tx, ty) {
   const tangentSpeed = body.vx * tx + body.vy * ty;
   const crossSurfaceSpeed = Math.abs(body.vx * -ty + body.vy * tx);
@@ -1687,7 +1690,7 @@ function nearJoint(body, support, world, tan_dist, tan_radius, length, tx, ty) {
     && hasConnectedEndpoint(world, support.id, 'start');
 }
 
-function hasConnectedEndpoint(world, componentId, anchor) { // 查这个端点有没有跟别的支撑接上
+function hasConnectedEndpoint(world, componentId, anchor) { //查这个端点有
   return world.connections.some((connection) => {
     if (connection?.kind !== 'coincident') return false;
     const leftMatches = connection.left?.componentId === componentId && connection.left?.anchor === anchor;
@@ -1698,7 +1701,7 @@ function hasConnectedEndpoint(world, componentId, anchor) { // 查这个端点�
   });
 }
 
-// 碰支撑面的统一出口：恢复系数、摩擦、传送带速度都在这里处理掉
+// 碰支撑面的统一出口
 function bounceVelocity(body, nx, ny, material, world, { preserveSmoothTrackSpeed = false, preserveGuideDirection = 0 } = {}) {
   const normalSpeed = body.vx * nx + body.vy * ny;
   if (normalSpeed >= 0) return;
@@ -1709,14 +1712,13 @@ function bounceVelocity(body, nx, ny, material, world, { preserveSmoothTrackSpee
     const tangentSpeed = body.vx * tx + body.vy * ty;
     const speed = Math.hypot(body.vx, body.vy);
     const incidenceRatio = speed > EPSILON ? Math.abs(normalSpeed) / speed : 0;
-    // 法向速度很小时那是离散积分从理想轨道上飘出来的一点，
-    // 只有这种情况保速度；看得见角度的撞击就得把法向能量耗掉，
-    // 不能白送成切向加速
+    // 法向速度很小时
+
     const continuousTrackContact = incidenceRatio <= 0.25;
     const constrainedTangentSpeed = preserveGuideDirection
       ? Math.sign(preserveGuideDirection) * speed
       : continuousTrackContact
-        ? Math.sign(tangentSpeed || 1) * speed
+        ? Math.sign(tangentSpeed || 1) * speed//只有这种情况保速度
       : tangentSpeed;
     body.vx = tx * constrainedTangentSpeed;
     body.vy = ty * constrainedTangentSpeed;
@@ -1754,8 +1756,10 @@ function bounceVelocity(body, nx, ny, material, world, { preserveSmoothTrackSpee
   }
 }
 
-// 恢复系数的优先级：粘合对直接 0 → 全局非弹性 0 → 材料里配的 → 全局弹性 1 →
-// 都没有就取两边小的那个。顺序别动，动了能量审计对不上。
+//恢复系数的优先级
+//粘合对-》全局非弹性-》材料里的-》全局弹性
+//都没有就取两边小的那个
+//如果你不想能量审计对不上就不要动这里的顺序!!!
 function bounceOf(world, left, right, foundationContact = false) {
   if (foundationContact && left?.compoundMemberIds?.length) {
     return Math.min(...world.bodies.filter(body => left.compoundMemberIds.includes(body.id))
@@ -1763,23 +1767,26 @@ function bounceOf(world, left, right, foundationContact = false) {
   }
   if (!foundationContact && collisionBinding(world, left, right)) return 0;
   if (world.collisionMode === 'inelastic') return 0;
-  // 弹性碰撞题（等质量交换速度）要 1，完全非弹性（子弹打木块）要 0，题面一般会写清楚
+
   const configured = contactMaterial(world, left, right);
+  // 弹性碰撞题（等质量交换速度）
   if (configured?.restitution != null) return clamp(Number(configured.restitution), 0, 1);
   if (!foundationContact && world.collisionMode === 'elastic') return 1;
   return Math.min(Number(left?.restitution ?? 1), Number(right?.restitution ?? 0));
 }
 
-// 出界回弹。只有 bounce 模式才调，open 模式直接飞出去
+// 出界回弹
 function resolveBounds(body, world) {
-  // 以前这里还判过 body.kind==='wedge' 的情况，后来楔形不走这条路了
-  //console.log('bounds', body.id)
+  // 以前这里还判过 body.kind==='wedge' 的情况
+  // but now楔形不走这条路了
+  //console.log('bounds',body.id)
   const radiusX = body.physicsGeometry === 'point' ? 0 : body.kind === 'ball' ? body.radius : body.width / 2;
   const radiusY = body.physicsGeometry === 'point' ? 0 : body.kind === 'ball' ? body.radius : body.height / 2;
-  //画布边界，这几个数是跟视口对过的，别乱改
+  //画布边界
   const pad = 24;
-  //顶边以前也弹的：if (body.y - radiusY < pad) { body.y = pad + radiusY; ... }
-  //后来出的题都碰不到顶边，删了
+  //顶边以前也弹的
+  //if (body.y - radiusY < pad) { body.y = pad + radiusY; ... }
+  //后来出的题都碰不到顶边
   if (body.x - radiusX < pad) {
     body.x = pad + radiusX;
     bounceVelocity(body, 1, 0, { restitution: 0.72, friction: 0.08 }, world);
@@ -1798,10 +1805,11 @@ function resolveBounds(body, world) {
   }
 }
 
-// 按形状分派。顺序有讲究：凹槽先判，不然楔形会被当成普通盒子
+// 按形状分派
 function resolveBodyPair(a, b, world) {
   if (a.kind === 'groove' || a.kind === 'half-groove') return dealConcave(a, b, world);
   if (b.kind === 'groove' || b.kind === 'half-groove') return dealConcave(b, a, world);
+
   if (a.kind === 'wedge') return dealWedge(a, b, world);
   if (b.kind === 'wedge') return dealWedge(b, a, world);
   if (a.physicsGeometry === 'point' || b.physicsGeometry === 'point') {
@@ -1813,14 +1821,14 @@ function resolveBodyPair(a, b, world) {
   return hitCircles(a, b, world);
 }
 
-// 质点参与的对撞单独走一套：点在盒子里和点在盒子外是两种算法
+// 质点参与的对撞特判，是的我们到处都是特判
 function resolvePointBodyPair(a, b, world) {
   const pointA = a.physicsGeometry === 'point';
   const pointB = b.physicsGeometry === 'point';
   if (pointA && pointB) {
     const dx = b.x - a.x, dy = b.y - a.y;
     const distance = Math.hypot(dx, dy);
-    const contactTolerance = 2; //两像素内算贴上，再大就看着像悬空
+    const contactTolerance = 2; //两像素内判为贴上
     if (distance >= contactTolerance) return;
     const relativeX = b.vx - a.vx, relativeY = b.vy - a.vy;
     const relativeLength = Math.hypot(relativeX, relativeY);
@@ -1846,12 +1854,12 @@ function resolvePointBodyPair(a, b, world) {
       { distance: point.y - (solid.y - halfHeight), nx: 0, ny: 1 },
       { distance: solid.y + halfHeight - point.y, nx: 0, ny: -1 },
     ];
-    // 上一步还贴着顶面或更高的，只可能是从顶面进来的：题里声明的骑乘者，
-    // 或者从等高的邻面（"平台与小车上表面等高"）平移过来的
+
+
     const declaredTopSupport = Math.abs(Number(solid.angle ?? 0)) < EPSILON
       && Number(point.previousY) <= solid.y - halfHeight + 1
       && ([point.supportId, point.supportedBy, point.attachedTo].includes(solid.id) || point.vy - solid.vy >= -EPSILON);
-    // 载具端点处侧面距离和顶面距离会打平，从上面来的声明骑乘者归顶面管，不归侧壁
+    // 载具端点处侧面距离和顶面距离会打平
     const face = declaredTopSupport ? faces[2]
       : faces.reduce((closest, candidate) => candidate.distance < closest.distance ? candidate : closest);
     // 正好落在面上的点会被积分先推进去零点几像素再解碰撞，
