@@ -1862,13 +1862,12 @@ function resolvePointBodyPair(a, b, world) {
     // 载具端点处侧面距离和顶面距离会打平
     const face = declaredTopSupport ? faces[2]
       : faces.reduce((closest, candidate) => candidate.distance < closest.distance ? candidate : closest);
-    // 正好落在面上的点会被积分先推进去零点几像素再解碰撞，
-    // 对最近的那面解。要是用指向盒中心的向量，水平顶面接触会被算成斜撞，
-    // 横向动量瞬间丢一大截
+    //积分先推进去几像素
+
     applyPairImpulse(point, solid, face.nx, face.ny, Math.max(0, face.distance) + 1, world);
     registerContact(world, point.id, solid.id);
     return;
-  }
+  }//对最近的那面解
   const nearestX = solid.kind === 'ball' ? solid.x : clamp(point.x, solid.x - halfWidth, solid.x + halfWidth);
   const nearestY = solid.kind === 'ball' ? solid.y : clamp(point.y, solid.y - halfHeight, solid.y + halfHeight);
   const dx = solid.x - point.x, dy = solid.y - point.y;
@@ -1876,7 +1875,7 @@ function resolvePointBodyPair(a, b, world) {
   const distance = Math.hypot(contactX, contactY);
   const threshold = (solid.kind === 'ball' ? solid.radius : 0) + 1;
   if (distance >= threshold) return;
-  // 沿水平盒顶滑到顶角上不算侧面撞：一旦到了盒子正上方就走上面的顶面规则
+  // 沿盒顶滑到顶角上不算侧面撞击
   if (solid.kind === 'box' && Math.abs(Number(solid.angle ?? 0)) < EPSILON
     && (point.x < solid.x - halfWidth || point.x > solid.x + halfWidth)
     && point.y <= solid.y - halfHeight + 1 && Number(point.previousY) <= solid.y - halfHeight + 1) return;
@@ -1893,7 +1892,7 @@ function resolvePointBodyPair(a, b, world) {
   registerContact(world, point.id, solid.id);
 }
 
-// 楔形当一条斜线段处理，斜面法向朝上
+// 楔形当一条斜线段处理
 function dealWedge(wedge, body, world) {
   if (['wedge', 'groove', 'half-groove'].includes(body.kind)) return;
   const halfWidth = Number(wedge.width) / 2;
@@ -1939,7 +1938,7 @@ function dealWedge(wedge, body, world) {
   registerContact(world, wedge.id, body.id);
 }
 
-// 凹槽/半槽：转到容器局部坐标里算，半径和角度域都得对，容易错
+// 凹槽/半槽
 function dealConcave(container, body, world) {
   if (['wedge', 'groove', 'half-groove'].includes(body.kind)) return;
   const width = Math.max(1, Number(container.width));
@@ -1993,7 +1992,7 @@ function dealConcave(container, body, world) {
   registerContact(world, container.id, body.id);
 }
 
-function hitCircles(a, b, world) { // 圆圆最简单，法向就是圆心连线
+function hitCircles(a, b, world) { // 圆圆法向就是圆心连线
   const dx = b.x-a.x, dy = b.y-a.y;
   const distance = Math.hypot(dx, dy) || 1;
   const minimum = a.radius + b.radius;
@@ -2002,12 +2001,12 @@ function hitCircles(a, b, world) { // 圆圆最简单，法向就是圆心连线
   registerContact(world, a.id, b.id);
 }
 
-// 盒盒相撞，按穿透浅的那个轴分开
+// 相撞
 function dealBoxBox(a, b, world) {
   const overlapX = a.width/2 + b.width/2 - Math.abs(b.x-a.x);
   const overlapY = a.height/2 + b.height/2 - Math.abs(b.y-a.y);
   if (overlapX <= 0 || overlapY <= 0) return;
-  //哪个方向浅就往哪个方向推开
+  //往方向浅的方向推开
   if (overlapX < overlapY) {
     applyPairImpulse(a, b, Math.sign(b.x-a.x) || 1, 0, overlapX, world);
   } else {
@@ -2016,7 +2015,7 @@ function dealBoxBox(a, b, world) {
   registerContact(world, a.id, b.id);
 }
 
-// 球盒：先夹到盒子上找最近点；完全重合时按深浅挑一个轴推出去
+// 球盒
 function pushBallBox(ball, box, world) {
   const half_w = box.width/2, half_h = box.height/2;
   const px = clamp(ball.x, box.x-half_w, box.x+half_w);
@@ -2046,7 +2045,7 @@ function registerContact(world, leftId, rightId) { // 接触键统一排序，�
   world.contactKeys.add(key);
 }
 
-// 冲量主体：先按逆质量推开，再算法向冲量，最后补切向摩擦冲量
+// 冲量主体
 function applyPairImpulse(a, b, nx, ny, penetration, world) {
   const compoundA = world.compounds.find(item => item.memberIds.includes(a.id));
   const compoundB = world.compounds.find(item => item.memberIds.includes(b.id));
@@ -2078,7 +2077,7 @@ function applyPairImpulse(a, b, nx, ny, penetration, world) {
   const binding = collisionBinding(world, a, b);
   const impactState = binding ? bindingImpactState(world, a, b) : null;
   const restitution = bounceOf(world, a, b);
-  // 这就是课本上那个式子，别自己推，推出来的符号容易反
+  //课本上的那个式子
   const impulse = -(1 + restitution) * rel_n / inverseSum;
   kick(a, compoundA, -impulse * nx * inverseA, -impulse * ny * inverseA);
   kick(b, compoundB, impulse * nx * inverseB, impulse * ny * inverseB);
@@ -2093,7 +2092,7 @@ function applyPairImpulse(a, b, nx, ny, penetration, world) {
     contactPairKey(a.id, b.id));
 }
 
-// 粘合前的动量和动能快照，后面审计要看这个
+//粘合前的动量和动能快照
 function bindingImpactState(world, a, b) {
   const connected = world.compounds.filter(item => item.memberIds.includes(a.id) || item.memberIds.includes(b.id));
   const ids = new Set([a.id, b.id, ...connected.flatMap(item => item.memberIds)]);
@@ -2106,7 +2105,7 @@ function bindingImpactState(world, a, b) {
   }, { momentum: { x: 0, y: 0 }, kinetic: 0 });
 }
 
-function collisionBinding(world, a, b) { // 找这一对背后有没有声明过的粘合
+function collisionBinding(world, a, b) { //找一对背后没有声明过的粘合
   const membersFor = id => world.compounds.find(item => item.memberIds.includes(id))?.memberIds ?? [id];
   const leftIds = membersFor(a.id), rightIds = membersFor(b.id);
   return world.collisionBindings?.find(binding => !binding.active
@@ -2114,11 +2113,11 @@ function collisionBinding(world, a, b) { // 找这一对背后有没有声明过
       || (leftIds.includes(binding.rightId) && rightIds.includes(binding.leftId))));
 }
 
-function sameCompound(world, leftId, rightId) { // 同一个复合体内部不解碰撞，不然自己跟自己打架
+function sameCompound(world, leftId, rightId) { //同一个复合体内部不解碰撞
   return world.compounds.some(item => item.memberIds.includes(leftId) && item.memberIds.includes(rightId));
 }
 
-// 粘上：合成一个整体，质量和质心按质量加权，速度取共同速度
+//粘上合成一个整体
 function stickPair(binding, a, b, world, impactState = null, impactPair = null) {
   const connected = world.compounds.filter(item => item.memberIds.includes(a.id) || item.memberIds.includes(b.id));
   const memberIds = [...new Set([a.id, b.id, ...connected.flatMap(item => item.memberIds)])];
@@ -2129,8 +2128,8 @@ function stickPair(binding, a, b, world, impactState = null, impactPair = null) 
   const mass = bodies.reduce((sum, body) => sum + bodyMass(body), 0);
   const weighted = field => bodies.reduce((sum, body) => sum + bodyMass(body) * Number(body[field]), 0) / mass;
   const x = weighted('x'), y = weighted('y'), vx = weighted('vx'), vy = weighted('vy');
-  // 预连接的装置在编辑器里还要保留各自的零件，只有碰撞粘合
-  // 才生成那个替代用的整体字形，动力学上是共享的
+  // 预连接的装置在编辑器里要保留各自的零件
+  //but动力学上是共享的
   const formationKind = binding.kind === 'rigid-from-start'
     && connected.every(item => item.formationKind === 'initial-assembly')
     ? 'initial-assembly' : 'collision-adhesion';
@@ -2154,7 +2153,7 @@ function stickPair(binding, a, b, world, impactState = null, impactPair = null) 
   putMembers(compound, new Map(world.bodies.map(item => [item.id, item])));
 }
 
-// 粘合正好发生在弧上的时候顺手接管轨道，不然会当场掉下去
+// 粘合正好发生在弧上的时候顺手接管轨道
 function carryArc(compound, formerTracks, world) {
   if (!formerTracks.length || formerTracks.some(state => !state?.supportId)) return;
   const supportId = formerTracks[0].supportId;
@@ -2190,7 +2189,7 @@ function carryArc(compound, formerTracks, world) {
   compound.vy = tangent.y * tangentSpeed;
 }
 
-// 把复合体的位姿写回每个成员，偏移要跟着一起转
+// 把复合体的位姿复写进每个成员里头
 function putMembers(compound, bodies) {
   const cosine = Math.cos(compound.angle), sine = Math.sin(compound.angle);
   for (const id of compound.memberIds) {
@@ -2204,7 +2203,7 @@ function putMembers(compound, bodies) {
   }
 }
 
-// 反算：成员被外力推过之后，把复合体的质心拉回来对齐
+// 反算，用于把复合体的质心拉回来对齐
 function syncBinds(world, bodies) {
   for (const compound of world.compounds) {
     if (compound.trackState) {
@@ -2220,19 +2219,18 @@ function syncBinds(world, bodies) {
   }
 }
 
-// 摩擦系数查找。优先级一路往下掉：
-// 复合体按质量加权 → 摩擦区 → 老场景兜底 → 材料表 → 容器内壁 → 单边配置 → 几何均值。
+// 摩擦系数查找
 function pairFriction(a, b, world) {
   if (a?.compoundMemberIds?.length) {
     return world.bodies.filter(body => a.compoundMemberIds.includes(body.id))
       .reduce((sum, body) => sum + bodyMass(body) * pairFriction(body, b, world), 0) / bodyMass(a);
   }
   if (b?.compoundMemberIds?.length) return pairFriction(b, a, world);
-  // 支撑面能沿长度带摩擦区（防滑条、粗糙MN段）：人在区里就听区的
+  //支撑面能沿长度带摩擦区（防滑条、粗糙MN段）
   const zoned = zoneFriction(a, b) ?? zoneFriction(b, a);
   if (zoned != null) return zoned;
   if (a.semanticType === 'legacy-strip' || b.semanticType === 'legacy-strip') {
-    //给老场景兜底的，现在走不到，先留着
+    //给老场景兜底
     return clamp(Math.max(Number(a.friction ?? 0), Number(b.friction ?? 0)), 0, 1.5);
   }
   const configured = contactMaterial(world, a, b);
@@ -2253,7 +2251,7 @@ function pairFriction(a, b, world) {
   return 0;
 }
 
-function zoneFriction(support, body) { // 摩擦区按沿支撑方向的位置判，斜面一样适用
+function zoneFriction(support, body) { // 摩擦区按沿支撑方向
   if (support?.role !== 'support' || !Array.isArray(support.frictionZones) || !support.frictionZones.length
     || body?.role !== 'body') return null;
   const dx = Number(support.x2) - Number(support.x1), dy = Number(support.y2) - Number(support.y1);
@@ -2264,34 +2262,34 @@ function zoneFriction(support, body) { // 摩擦区按沿支撑方向的位置�
   return zone ? clamp(Number(zone.friction ?? 0), 0, 1.5) : null;
 }
 
-// 这层就是给上面留个口子，别的地方统一叫 contactFriction
+//contactFriction的别名接口
 function contactFriction(world, left, right) {
   return pairFriction(left, right, world);
 }
 
-// 引擎在身体和支撑面之间实际用的摩擦系数：
-// 外面的核对（能量审计那些）要跟积分器用的一致
+// 引擎在身体和支撑面之间实际用的摩擦系数
 export function muOn(world, body, support) {
   return body && support ? contactFriction(world, body, support) : 0;
 }
 
-function contactMaterial(world, left, right) { // 材料表是对称的，键在存的时候就排过序了
+function contactMaterial(world, left, right) { // 材料表是对称的
   return world.contactMaterials?.get(contactPairKey(left?.id, right?.id)) ?? null;
 }
 
-function contactPairKey(leftId, rightId) { // 两两配对的键，永远小的在前
+function contactPairKey(leftId, rightId) { // 两两配对的键
   const left = String(leftId ?? '');
   const right = String(rightId ?? '');
   return left < right ? `${left}|${right}` : `${right}|${left}`;
 }
-function inverseMass(body) { // 固定物体当无穷大质量，逆质量给 0
+function inverseMass(body) { // 固定物体当无穷大质量，逆质量居然是0耶（
   return body.fixed === true ? 0 : 1 / bodyMass(body);
 }
 
-// 盒子在某个方向上的支撑半径：把半宽半高投到法向上
+// 盒子在某个方向上的支撑半径
 function supportRadius(body, nx, ny) {
   if (body.physicsGeometry === 'point') return 0;
   if (body.kind === 'ball') return Number(body.radius);
+  // if (body.kind === 'box')return Math.min(Number(body.width),Number(body.height)/2);
   const angle = Number(body.angle ?? 0);
   const cosine = Math.cos(angle);
   const sine = Math.sin(angle);
@@ -2301,7 +2299,7 @@ function supportRadius(body, nx, ny) {
     + Math.abs(proj_y) * Number(body.height) / 2;
 }
 
-// 能量和动量每步重算，题目里要对数的，慢一点也认了
+// 能量和动量重算
 function calculateMetrics(world, anchors, bodies) {
   const pixelsPerMeter = world.pixelsPerMeter;
   let kinetic = 0;
@@ -2314,7 +2312,7 @@ function calculateMetrics(world, anchors, bodies) {
     const vx = body.vx / pixelsPerMeter;
     const vy = body.vy / pixelsPerMeter;
     kinetic += 0.5 * body.mass * (vx * vx + vy * vy);
-    //势能零点取场景那条参考线
+    //势能零点取场景的参考线
     potential += body.mass * (world.gravity / pixelsPerMeter) * ((world.potentialReferenceY - body.y) / pixelsPerMeter);
     px += body.mass * vx;
     py += body.mass * vy;
@@ -2329,7 +2327,7 @@ function calculateMetrics(world, anchors, bodies) {
     spring += 0.5 * constraint.stiffness * stretchMeters * stretchMeters;
   }
   world.energy = kinetic + potential + spring;
-  // 复合弹簧的弹性势能单独加：解放之前按压缩量算，之后不再计
+  // 复合弹簧的弹性势能单独叠加
   if(world.hybridProcess){
     let stored=0;
     for(const c of world.hybridSprings){
@@ -2351,12 +2349,12 @@ function calculateMetrics(world, anchors, bodies) {
   world.momentum = { x: px, y: py };
 }
 
-// 给渲染和外部核对用的快照。纯拷贝，别在这里算东西
+// 给渲染和外部核对用的快照，只做拷贝使用
 export function snapshotOf(world) {
-  //TODO: 字段顺序有测试盯着比对，加字段前想清楚
+  //TODO:这个字段顺序不是很对，估计是不会记得改了
   const anchors = new Map(world.anchors.map((item) => [item.id, item]));
   const bodies = new Map(world.bodies.map((item) => [item.id, item]));
-  // 只输出外部要用的字段。contactKeys 那种内部集合不往外给，给了也没人看
+  // 只输出外部要用的字段
   return {
     time: world.time,
     completed: world.completed === true,
@@ -2415,7 +2413,7 @@ export function snapshotOf(world) {
   };
 }
 
-function springEndSnap(endpoint, mode) { // 接触端的 id 要一起带出去，渲染那边要标接触点
+function springEndSnap(endpoint, mode) { // 接触端的id要一起带出去
   return {
     x: Number(endpoint.x),
     y: Number(endpoint.y),
@@ -2423,24 +2421,24 @@ function springEndSnap(endpoint, mode) { // 接触端的 id 要一起带出去�
   };
 }
 
-//clamp 用得多，放近一点
+//clamp
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function normalizedAngle(angle) { // 统一到 [0, 2π)
+function normalizedAngle(angle) { //统一到[0, 2π)
   const full = Math.PI * 2;
   return ((angle % full) + full) % full;
 }
 
-function canonicalBoxAngle(angle) { // 盒子角度折到 ±90°，转过去看着一样，物理上也一样
+function canonicalBoxAngle(angle) { //盒子角度折到 ±90°可以使用转过九十度的替代
   let value = Number(angle)||0;
   while(value>Math.PI/2)value-=Math.PI;
   while(value<=-Math.PI/2)value+=Math.PI;
   return value;
 }
 
-function angleWithin(angle, start, end) { // 区间可能跨零，分两种情况
+function angleWithin(angle, start, end) { //区间可能跨零，分两种情况
   const normalizedStart = normalizedAngle(start);
   const normalizedEnd = normalizedAngle(end);
   if (normalizedStart <= normalizedEnd) return angle >= normalizedStart && angle <= normalizedEnd;
